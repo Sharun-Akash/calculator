@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
@@ -23,7 +23,7 @@ interface RateTier {
 }
 
 interface SavedSummary {
-  id: string; // We will use this timestamp for the calendar filter
+  id: string;
   name: string;
   date: string;
   summaryText: string;
@@ -84,11 +84,14 @@ export default function App() {
   const [showSavePrompt, setShowSavePrompt] = useState(false);
   const [summaryName, setSummaryName] = useState('');
   const [clearAfterSave, setClearAfterSave] = useState(true);
-  
-  // New State for Calendar View
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
   
+  // Custom Alerts & Confirms State
+  const [toastMessage, setToastMessage] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string, onConfirm: () => void } | null>(null);
+  
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem('offlineBills', JSON.stringify(entries));
@@ -102,6 +105,12 @@ export default function App() {
     setCollectionRate(ratesConfig[category][0].coll);
     setMode('Normal'); 
   }, [category, ratesConfig]);
+
+  // Toast Helper
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
 
   const handleAdd = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -125,6 +134,7 @@ export default function App() {
       setEntries([newEntry, ...entries]);
       setCurrentInput('');
       setMode('Normal');
+      if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback if supported
       inputRef.current?.focus();
     }
   };
@@ -147,9 +157,14 @@ export default function App() {
   const handleDelete = (id: number) => setEntries(entries.filter(entry => entry.id !== id));
 
   const handleClearAll = () => {
-    if (window.confirm("Are you sure you want to clear all current entries?")) {
-      setEntries([]);
-    }
+    setConfirmDialog({
+      message: "Are you sure you want to clear all current entries?",
+      onConfirm: () => {
+        setEntries([]);
+        setConfirmDialog(null);
+        showToast("All entries cleared");
+      }
+    });
   };
 
   const generateSummaryText = () => {
@@ -178,11 +193,16 @@ export default function App() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert("Copied to clipboard!");
+    showToast("Copied to clipboard!");
+  };
+
+  const shareToWhatsApp = (text: string) => {
+    const encodedText = encodeURIComponent(text);
+    window.open(`https://wa.me/?text=${encodedText}`, '_blank');
   };
 
   const initiateSaveArchive = () => {
-    if (entries.length === 0) return alert("No entries to save.");
+    if (entries.length === 0) return showToast("No entries to save.");
     setSummaryName('');
     setShowSavePrompt(true);
   };
@@ -190,12 +210,12 @@ export default function App() {
   const confirmSaveArchive = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!summaryName || summaryName.trim() === "") {
-      alert("Please enter a valid name.");
+      showToast("Please enter a valid name.");
       return;
     }
     
     const newArchive: SavedSummary = {
-      id: Date.now().toString(), // We use this timestamp to extract the date for the calendar
+      id: Date.now().toString(),
       name: summaryName.trim(),
       date: new Date().toLocaleString([], { 
         year: 'numeric', month: 'short', day: 'numeric', 
@@ -213,11 +233,11 @@ export default function App() {
     setShowSavePrompt(false);
     setShowSummary(false);
     
-    // Automatically set the filter to today's date so they see what they just saved
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     setArchiveDateFilter(todayStr);
     setShowArchives(true);
+    showToast("Summary saved successfully!");
   };
 
   const openSettings = () => {
@@ -229,20 +249,66 @@ export default function App() {
     setRatesConfig(tempRates);
     localStorage.setItem('customRates', JSON.stringify(tempRates));
     setShowSettings(false);
+    showToast("Settings saved!");
   };
 
   const handleResetSettings = () => {
-    if (window.confirm("Reset all rates to default? This will restore the default 4D base prices.")) {
-      setRatesConfig(DEFAULT_RATES);
-      localStorage.setItem('customRates', JSON.stringify(DEFAULT_RATES));
-      setShowSettings(false);
-    }
+    setConfirmDialog({
+      message: "Reset all rates to default? This will restore the original base prices.",
+      onConfirm: () => {
+        setRatesConfig(DEFAULT_RATES);
+        localStorage.setItem('customRates', JSON.stringify(DEFAULT_RATES));
+        setShowSettings(false);
+        setConfirmDialog(null);
+        showToast("Rates reset to default");
+      }
+    });
   };
 
   const updateTempRate = (cat: string, index: number, field: 'coll' | 'base', value: number) => {
     const newRates = { ...tempRates };
     newRates[cat][index][field] = value;
     setTempRates(newRates);
+  };
+
+  // Data Export / Import Backup Logic
+  const handleExportData = () => {
+    const dataToExport = {
+      ratesConfig,
+      entries,
+      archives
+    };
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `SharunsApp_Backup_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("Backup exported successfully!");
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const importedData = JSON.parse(event.target?.result as string);
+        
+        if (importedData.ratesConfig) setRatesConfig(importedData.ratesConfig);
+        if (importedData.entries) setEntries(importedData.entries);
+        if (importedData.archives) setArchives(importedData.archives);
+        
+        showToast("Backup restored successfully!");
+        setShowSettings(false);
+      } catch (error) {
+        showToast("Error reading backup file. Invalid format.");
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const getAvailableModes = () => {
@@ -253,14 +319,10 @@ export default function App() {
     return modes;
   };
 
-  // Filter Archives based on selected calendar date
   const filteredArchives = archives.filter(arc => {
-    if (!archiveDateFilter) return true; // Show all if no date selected
-    
-    // Convert archive ID (epoch timestamp) to local YYYY-MM-DD string
+    if (!archiveDateFilter) return true;
     const arcDate = new Date(parseInt(arc.id));
     const arcDateString = `${arcDate.getFullYear()}-${String(arcDate.getMonth() + 1).padStart(2, '0')}-${String(arcDate.getDate()).padStart(2, '0')}`;
-    
     return arcDateString === archiveDateFilter;
   });
 
@@ -269,124 +331,124 @@ export default function App() {
   const totalCommission = entries.reduce((sum, item) => sum + item.itemCommission, 0);
 
   return (
-    <div className="h-[100dvh] bg-gray-100 flex flex-col font-sans max-w-md mx-auto shadow-xl relative overflow-hidden">
+    <div className="h-[100dvh] bg-slate-900 flex flex-col font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden text-slate-100">
       
       {/* HEADER */}
-      <header className="bg-slate-800 text-white p-3 shadow-md z-10 flex justify-between items-center shrink-0">
-        <h1 className="text-lg font-bold tracking-wider truncate">SHARUN'S APP</h1>
+      <header className="bg-slate-950 text-slate-100 p-3 shadow-lg z-10 flex justify-between items-center shrink-0 border-b border-slate-800">
+        <h1 className="text-lg font-bold tracking-wider truncate text-blue-400">SHARUN'S APP</h1>
         <div className="flex gap-2 shrink-0">
-          <button onClick={() => setShowArchives(true)} className="bg-yellow-600 hover:bg-yellow-500 px-2 py-1 flex items-center rounded text-sm font-bold shadow">
-            <FaArchive className="mr-1"/> SAVED
+          <button onClick={() => setShowArchives(true)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
+            <FaArchive className="mr-1 text-amber-400"/> SAVED
           </button>
-          <button onClick={() => setShowSummary(true)} className="bg-blue-500 hover:bg-blue-600 px-2 py-1 flex items-center rounded text-sm font-bold shadow">
-            <FaClipboardList className="mr-1"/> SUM
+          <button onClick={() => setShowSummary(true)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
+            <FaClipboardList className="mr-1 text-blue-400"/> SUM
           </button>
-          <button onClick={openSettings} className="bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded text-sm shadow">
-            <FaCog />
+          <button onClick={openSettings} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 rounded text-sm shadow-sm transition">
+            <FaCog className="text-slate-300" />
           </button>
         </div>
       </header>
 
       {/* FILTERS */}
-      <div className="bg-slate-700 p-3 shrink-0">
-        <div className="grid grid-cols-3 gap-2 text-sm text-black">
-          <select className="p-2 rounded bg-white font-bold outline-none" value={category} onChange={(e) => setCategory(e.target.value)}>
+      <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10">
+        <div className="grid grid-cols-3 gap-2 text-sm">
+          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={category} onChange={(e) => setCategory(e.target.value)}>
             {Object.keys(ratesConfig).map(cat => <option key={cat} value={cat}>{cat}</option>)}
           </select>
-          <select className="p-2 rounded bg-white font-bold outline-none" value={collectionRate} onChange={(e) => setCollectionRate(Number(e.target.value))}>
+          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={collectionRate} onChange={(e) => setCollectionRate(Number(e.target.value))}>
             {ratesConfig[category].map((rate, i) => <option key={i} value={rate.coll}>₹{rate.coll}</option>)}
           </select>
-          <select className="p-2 rounded bg-white font-bold outline-none" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
             {getAvailableModes().map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
       </div>
 
       {/* INPUT AREA */}
-      <div className="bg-white p-3 shadow-sm border-b-2 border-gray-200 shrink-0 z-10">
+      <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg">
         <form onSubmit={handleAdd} className="flex gap-2">
           <input 
             ref={inputRef} 
             type="number" 
-            className="flex-1 text-xl p-2 border-2 border-slate-300 rounded text-center font-bold outline-none focus:border-blue-500" 
+            className="flex-1 text-xl p-2 bg-slate-900 border border-slate-700 rounded text-center font-bold text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition placeholder-slate-500" 
             placeholder="Enter Quantity" 
             value={currentInput} 
             onChange={(e) => setCurrentInput(e.target.value)} 
           />
-          <button type="submit" className="bg-blue-600 text-white px-5 rounded text-lg font-bold shadow-md">
+          <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 rounded text-lg font-bold shadow-md transition">
             <FaPlus className="inline mr-1" /> ADD
           </button>
         </form>
       </div>
 
       {/* DASHBOARD */}
-      <div className="bg-white p-3 shadow-sm border-b border-gray-200 shrink-0 mt-1">
+      <div className="bg-slate-900 p-3 shrink-0 mt-1">
         <div className="grid grid-cols-3 gap-2 text-sm text-center">
-          <div className="bg-gray-50 p-2 rounded border border-gray-200">
-            <div className="text-[9px] text-gray-500 font-bold">COLLECTION</div>
-            <div className="text-sm font-bold text-gray-800">₹{totalCollection.toFixed(2)}</div>
+          <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
+            <div className="text-[9px] text-slate-400 font-bold tracking-wider">COLLECTION</div>
+            <div className="text-sm font-bold text-blue-400">₹{totalCollection.toFixed(2)}</div>
           </div>
-          <div className="bg-orange-50 p-2 rounded border border-orange-200">
-            <div className="text-[9px] text-orange-600 font-bold">BASE</div>
-            <div className="text-sm font-bold text-orange-700">₹{totalBase.toFixed(2)}</div>
+          <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
+            <div className="text-[9px] text-slate-400 font-bold tracking-wider">BASE</div>
+            <div className="text-sm font-bold text-amber-500">₹{totalBase.toFixed(2)}</div>
           </div>
-          <div className="bg-green-50 p-2 rounded border border-green-200">
-            <div className="text-[9px] text-green-700 font-bold">COMMISSION</div>
-            <div className="text-sm font-black text-green-700">₹{totalCommission.toFixed(2)}</div>
+          <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
+            <div className="text-[9px] text-slate-400 font-bold tracking-wider">COMMISSION</div>
+            <div className="text-sm font-black text-emerald-400">₹{totalCommission.toFixed(2)}</div>
           </div>
         </div>
       </div>
 
       {/* TABLE */}
-      <div className="flex-1 overflow-y-auto bg-slate-50 p-2">
+      <div className="flex-1 overflow-y-auto bg-slate-900 p-2 pb-16">
         <div className="flex justify-between items-center mb-2 px-1">
-          <span className="text-xs font-bold text-slate-500 uppercase">Current Entries</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Current Entries</span>
           {entries.length > 0 && (
-            <button onClick={handleClearAll} className="text-xs text-red-500 hover:text-red-700 font-bold flex items-center bg-red-100 hover:bg-red-200 px-2 py-1 rounded transition">
+            <button onClick={handleClearAll} className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center bg-slate-800 border border-red-900/50 hover:bg-slate-700 px-2 py-1 rounded transition">
               <FaTrash className="mr-1"/> CLEAR ALL
             </button>
           )}
         </div>
 
-        <div className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
           <table className="w-full text-sm text-left">
-            <thead className="bg-slate-100 text-slate-600 font-bold text-[10px] uppercase">
+            <thead className="bg-slate-950 text-slate-400 font-bold text-[10px] uppercase tracking-wider">
               <tr>
-                <th className="px-2 py-2">Type</th>
-                <th className="px-2 py-2 text-center">Qty</th>
-                <th className="px-2 py-2 text-right">Details</th>
-                <th className="px-2 py-2 text-center">Del</th>
+                <th className="px-2 py-3">Type</th>
+                <th className="px-2 py-3 text-center">Qty</th>
+                <th className="px-2 py-3 text-right">Details</th>
+                <th className="px-2 py-3 text-center">Del</th>
               </tr>
             </thead>
             <tbody>
               {entries.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="text-center py-6 text-gray-400 font-medium">No entries yet.</td>
+                  <td colSpan={4} className="text-center py-8 text-slate-500 font-medium italic">No entries yet.</td>
                 </tr>
               ) : (
                 entries.map((entry) => (
-                  <tr key={entry.id} className="border-b border-gray-100">
-                    <td className="px-2 py-2">
-                      <div className="font-bold text-slate-800">{entry.category}</div>
-                      <div className="text-[10px] text-gray-500">₹{entry.rate}</div>
-                      {entry.mode !== 'Normal' && <div className="text-[9px] text-blue-600 font-bold">{entry.mode}</div>}
+                  <tr key={entry.id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition">
+                    <td className="px-2 py-3">
+                      <div className="font-bold text-slate-200">{entry.category}</div>
+                      <div className="text-[10px] text-slate-400">₹{entry.rate}</div>
+                      {entry.mode !== 'Normal' && <div className="text-[9px] text-blue-400 font-bold mt-0.5">{entry.mode}</div>}
                     </td>
-                    <td className="px-2 py-2 text-center">
+                    <td className="px-2 py-3 text-center">
                       <input 
                         type="number" 
                         value={entry.originalQty || ''} 
                         onChange={(e) => handleUpdateQty(entry.id, parseInt(e.target.value) || 0)}
-                        className="w-14 text-center font-bold text-lg border-b-2 border-slate-300 outline-none bg-transparent focus:border-blue-500"
+                        className="w-14 text-center font-bold text-lg border-b-2 border-slate-600 outline-none bg-transparent text-slate-100 focus:border-blue-400 transition"
                       />
-                      {entry.mode !== 'Normal' && <div className="text-[9px] text-gray-500 mt-1">(x{entry.multiplier}={entry.effectiveQty})</div>}
+                      {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-400 mt-1">(x{entry.multiplier}={entry.effectiveQty})</div>}
                     </td>
-                    <td className="px-2 py-2 text-right">
-                      <div className="font-bold text-slate-800 text-xs">C: ₹{entry.itemCollection}</div>
-                      <div className="text-[10px] text-orange-600">B: ₹{entry.itemBase}</div>
-                      <div className="text-[10px] text-green-600 font-bold">P: ₹{entry.itemCommission}</div>
+                    <td className="px-2 py-3 text-right">
+                      <div className="font-bold text-slate-200 text-xs">C: ₹{entry.itemCollection}</div>
+                      <div className="text-[10px] text-amber-500/90 mt-0.5">B: ₹{entry.itemBase}</div>
+                      <div className="text-[10px] text-emerald-400 font-bold mt-0.5">P: ₹{entry.itemCommission}</div>
                     </td>
-                    <td className="px-2 py-2 text-center">
-                      <button onClick={() => handleDelete(entry.id)} className="text-red-400 hover:text-red-600 p-2"><FaTrash /></button>
+                    <td className="px-2 py-3 text-center">
+                      <button onClick={() => handleDelete(entry.id)} className="text-red-400/80 hover:text-red-400 p-2 transition"><FaTrash /></button>
                     </td>
                   </tr>
                 ))
@@ -398,24 +460,29 @@ export default function App() {
 
       {/* SUMMARY MODAL */}
       {showSummary && (
-        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-sm flex flex-col max-h-[80vh]">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="font-bold text-lg">Report Summary</h2>
-              <button onClick={() => setShowSummary(false)} className="text-gray-500 text-xl"><FaTimes /></button>
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[80vh] shadow-2xl border border-slate-700">
+            <div className="flex justify-between items-center p-4 border-b border-slate-700">
+              <h2 className="font-bold text-lg text-slate-100">Report Summary</h2>
+              <button onClick={() => setShowSummary(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
-              <pre className="text-sm bg-gray-50 p-3 border rounded text-gray-800 whitespace-pre-wrap font-mono">
+              <pre className="text-sm bg-slate-900 p-4 border border-slate-700 rounded-lg text-slate-300 whitespace-pre-wrap font-mono shadow-inner">
                 {generateSummaryText() || "No entries to summarize."}
               </pre>
             </div>
-            <div className="p-4 border-t bg-gray-50 space-y-2">
-              <button onClick={initiateSaveArchive} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 rounded flex items-center justify-center shadow-sm">
-                <FaSave className="mr-2" /> SAVE THIS SUMMARY
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 space-y-3 rounded-b-xl">
+              <button onClick={initiateSaveArchive} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow-lg transition">
+                <FaSave className="mr-2" /> SAVE SUMMARY
               </button>
-              <button onClick={() => copyToClipboard(generateSummaryText())} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded flex items-center justify-center shadow-sm">
-                <FaCopy className="mr-2" /> COPY TEXT
-              </button>
+              <div className="flex gap-3">
+                <button onClick={() => copyToClipboard(generateSummaryText())} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm border border-slate-600">
+                  <FaCopy className="mr-2" /> COPY
+                </button>
+                <button onClick={() => shareToWhatsApp(generateSummaryText())} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm">
+                  <FaWhatsapp className="mr-2 text-lg" /> SHARE
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -423,97 +490,111 @@ export default function App() {
 
       {/* CUSTOM SAVE PROMPT MODAL */}
       {showSavePrompt && (
-        <div className="absolute inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-xs flex flex-col shadow-2xl">
-            <div className="p-4 border-b">
-              <h2 className="font-bold text-lg text-slate-800">Save Summary</h2>
+        <div className="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-xs flex flex-col shadow-2xl border border-slate-700">
+            <div className="p-4 border-b border-slate-700">
+              <h2 className="font-bold text-lg text-slate-100">Save Summary</h2>
             </div>
             <form onSubmit={confirmSaveArchive} className="p-4 space-y-4">
               <div>
-                <label className="text-xs font-bold text-gray-500 block mb-2">Enter a name for this summary:</label>
+                <label className="text-xs font-bold text-slate-400 block mb-2">Enter a name for this summary:</label>
                 <input 
                   type="text" 
                   value={summaryName} 
                   onChange={(e) => setSummaryName(e.target.value)}
-                  className="w-full border-2 border-slate-300 p-2 rounded outline-none focus:border-indigo-500 font-bold text-slate-800"
+                  className="w-full bg-slate-900 border border-slate-600 p-2.5 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-100 placeholder-slate-600 transition"
                   autoFocus
                   placeholder="e.g., Morning Shift"
                 />
               </div>
               
-              <div className="flex items-center gap-2 mt-2 bg-gray-50 p-2 rounded border border-gray-200">
+              <div className="flex items-center gap-2 mt-2 bg-slate-700/50 p-2.5 rounded-lg border border-slate-600">
                 <input 
                   type="checkbox" 
                   id="clearAfterSave" 
                   checked={clearAfterSave} 
                   onChange={(e) => setClearAfterSave(e.target.checked)} 
-                  className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-800 bg-slate-900 cursor-pointer"
                 />
-                <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
                   Clear calculations after saving
                 </label>
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowSavePrompt(false)} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 rounded">Cancel</button>
-                <button type="submit" className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 rounded shadow-sm">Save</button>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowSavePrompt(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 rounded-lg transition border border-slate-600">Cancel</button>
+                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition">Save</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ARCHIVES MODAL WITH CALENDAR VIEW */}
+      {/* ARCHIVES MODAL WITH CALENDAR VIEW & WHATSAPP */}
       {showArchives && (
-        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-sm flex flex-col max-h-[85vh]">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="font-bold text-lg">Saved Summaries</h2>
-              <button onClick={() => setShowArchives(false)} className="text-gray-500 text-xl"><FaTimes /></button>
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[85vh] shadow-2xl border border-slate-700">
+            <div className="flex justify-between items-center p-4 border-b border-slate-700">
+              <h2 className="font-bold text-lg text-slate-100">Saved Summaries</h2>
+              <button onClick={() => setShowArchives(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
             </div>
             
-            {/* Calendar Filter Section */}
-            <div className="p-3 bg-yellow-50 border-b flex flex-col gap-2">
-              <label className="text-xs font-bold text-yellow-800 flex items-center gap-1">
-                <FaCalendarAlt /> CALENDAR VIEW
+            <div className="p-4 bg-slate-900 border-b border-slate-700 flex flex-col gap-2">
+              <label className="text-xs font-bold text-amber-500 flex items-center gap-1.5 tracking-wider">
+                <FaCalendarAlt /> FILTER BY DATE
               </label>
               <div className="flex gap-2">
                 <input 
                   type="date" 
                   value={archiveDateFilter}
                   onChange={(e) => setArchiveDateFilter(e.target.value)}
-                  className="flex-1 p-2 border border-yellow-300 rounded outline-none font-bold text-slate-700 bg-white"
+                  className="flex-1 p-2 bg-slate-800 border border-slate-600 rounded-lg outline-none font-bold text-slate-200 focus:border-blue-500 transition"
+                  style={{ colorScheme: 'dark' }} // Native dark mode calendar picker
                 />
                 {archiveDateFilter && (
-                  <button onClick={() => setArchiveDateFilter('')} className="bg-gray-200 hover:bg-gray-300 px-3 rounded text-xs font-bold text-gray-700">
+                  <button onClick={() => setArchiveDateFilter('')} className="bg-slate-700 hover:bg-slate-600 px-4 rounded-lg text-xs font-bold text-slate-200 transition border border-slate-600">
                     CLEAR
                   </button>
                 )}
               </div>
             </div>
 
-            <div className="p-4 overflow-y-auto flex-1 space-y-3">
+            <div className="p-4 overflow-y-auto flex-1 space-y-4 bg-slate-900/50">
               {archives.length === 0 ? (
-                <p className="text-center text-gray-400 py-4">No saved summaries yet.</p>
+                <p className="text-center text-slate-500 py-8 italic font-medium">No saved summaries yet.</p>
               ) : filteredArchives.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500 font-bold">No bills saved on this date.</p>
-                  <button onClick={() => setArchiveDateFilter('')} className="text-blue-500 text-sm mt-2 font-bold underline">View All Dates</button>
+                <div className="text-center py-10">
+                  <p className="text-slate-400 font-bold">No bills saved on this date.</p>
+                  <button onClick={() => setArchiveDateFilter('')} className="text-blue-400 text-sm mt-3 font-bold hover:underline">View All Dates</button>
                 </div>
               ) : (
                 filteredArchives.map(arc => (
-                  <div key={arc.id} className="bg-gray-50 border rounded p-3">
-                    <div className="flex justify-between items-start mb-2">
+                  <div key={arc.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <div className="flex justify-between items-start mb-3">
                       <div>
-                        <h3 className="font-bold text-slate-800">{arc.name}</h3>
-                        <p className="text-[10px] text-gray-500 font-medium">{arc.date}</p>
+                        <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
+                        <p className="text-[10px] text-slate-400 font-medium mt-0.5">{arc.date}</p>
                       </div>
-                      <button onClick={() => setArchives(archives.filter(a => a.id !== arc.id))} className="text-red-400 hover:text-red-600 mt-1"><FaTrash /></button>
+                      <button onClick={() => {
+                        setConfirmDialog({
+                          message: `Delete saved summary "${arc.name}"?`,
+                          onConfirm: () => {
+                            setArchives(archives.filter(a => a.id !== arc.id));
+                            setConfirmDialog(null);
+                            showToast("Summary deleted");
+                          }
+                        });
+                      }} className="text-red-400/80 hover:text-red-400 transition mt-1 bg-slate-900 p-2 rounded-lg"><FaTrash /></button>
                     </div>
-                    <pre className="text-xs bg-white p-2 border rounded text-gray-600 font-mono mb-2 whitespace-pre-wrap">{arc.summaryText}</pre>
-                    <button onClick={() => copyToClipboard(arc.summaryText)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-1 rounded text-xs flex items-center justify-center">
-                      <FaCopy className="mr-1" /> COPY
-                    </button>
+                    <pre className="text-xs bg-slate-900 p-3 border border-slate-700 rounded-lg text-slate-300 font-mono mb-3 whitespace-pre-wrap shadow-inner">{arc.summaryText}</pre>
+                    <div className="flex gap-2">
+                      <button onClick={() => copyToClipboard(arc.summaryText)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2 rounded-lg text-xs flex items-center justify-center transition border border-slate-600">
+                        <FaCopy className="mr-1.5" /> COPY
+                      </button>
+                      <button onClick={() => shareToWhatsApp(arc.summaryText)} className="flex-1 bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-400 font-bold py-2 rounded-lg text-xs flex items-center justify-center border border-emerald-800 transition">
+                        <FaWhatsapp className="mr-1.5 text-sm" /> SHARE
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -524,40 +605,91 @@ export default function App() {
 
       {/* SETTINGS MODAL */}
       {showSettings && (
-        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-sm flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="font-bold text-lg">Edit Price Rates</h2>
-              <button onClick={() => setShowSettings(false)} className="text-gray-500 text-xl"><FaTimes /></button>
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[90vh] shadow-2xl border border-slate-700">
+            <div className="flex justify-between items-center p-4 border-b border-slate-700">
+              <h2 className="font-bold text-lg text-slate-100">Settings & Rates</h2>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-6">
+              
+              {/* BACKUP SECTION */}
+              <div className="bg-slate-900 border border-blue-900/50 p-4 rounded-xl shadow-inner">
+                <h3 className="font-bold text-blue-400 text-xs mb-3 uppercase tracking-wider flex items-center">
+                  <FaArchive className="mr-2"/> Data Backup
+                </h3>
+                <div className="flex gap-3">
+                  <button onClick={handleExportData} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg text-xs flex items-center justify-center shadow transition">
+                    <FaFileExport className="mr-1.5" /> EXPORT
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-slate-800 border border-blue-500/50 hover:bg-slate-700 text-blue-400 font-bold py-2.5 rounded-lg text-xs flex items-center justify-center transition">
+                    <FaFileImport className="mr-1.5" /> IMPORT
+                  </button>
+                  <input 
+                    type="file" 
+                    accept=".json" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    onChange={handleImportData}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-3 leading-relaxed">Export your data regularly to prevent accidental loss. Import a backup file to restore your entries and rates.</p>
+              </div>
+
               {Object.keys(tempRates).map(cat => (
-                <div key={cat}>
-                  <h3 className="font-black text-slate-800 mb-2 border-b pb-1">{cat} Tiers</h3>
+                <div key={cat} className="bg-slate-800 border border-slate-700 p-3 rounded-xl">
+                  <h3 className="font-black text-slate-300 mb-3 border-b border-slate-700 pb-2">{cat} Tiers</h3>
                   {tempRates[cat].map((rate, i) => (
-                    <div key={i} className="flex gap-2 mb-2 items-center">
+                    <div key={i} className="flex gap-3 mb-3 items-center">
                       <div className="flex-1">
-                        <label className="text-[10px] text-gray-500 font-bold block">SALE PRICE</label>
-                        <input type="number" step="0.1" value={rate.coll} onChange={(e) => updateTempRate(cat, i, 'coll', Number(e.target.value))} className="w-full border p-1 rounded text-sm font-bold bg-slate-50"/>
+                        <label className="text-[10px] text-blue-400 font-bold block mb-1">SALE PRICE</label>
+                        <input type="number" step="0.1" value={rate.coll} onChange={(e) => updateTempRate(cat, i, 'coll', Number(e.target.value))} className="w-full bg-slate-900 border border-slate-600 p-1.5 rounded text-sm font-bold text-slate-200 outline-none focus:border-blue-500 transition"/>
                       </div>
                       <div className="flex-1">
-                        <label className="text-[10px] text-orange-600 font-bold block">COMPANY BASE</label>
-                        <input type="number" step="0.1" value={rate.base} onChange={(e) => updateTempRate(cat, i, 'base', Number(e.target.value))} className="w-full border p-1 rounded text-sm font-bold bg-orange-50"/>
+                        <label className="text-[10px] text-amber-500 font-bold block mb-1">COMPANY BASE</label>
+                        <input type="number" step="0.1" value={rate.base} onChange={(e) => updateTempRate(cat, i, 'base', Number(e.target.value))} className="w-full bg-slate-900 border border-slate-600 p-1.5 rounded text-sm font-bold text-slate-200 outline-none focus:border-amber-500 transition"/>
                       </div>
                     </div>
                   ))}
                 </div>
               ))}
             </div>
-            <div className="p-4 border-t bg-gray-50">
-              <button onClick={handleResetSettings} className="w-full bg-red-100 hover:bg-red-200 text-red-600 font-bold py-2 rounded flex items-center justify-center shadow-sm mb-3 text-sm">
-                RESET TO DEFAULTS
+            <div className="p-4 border-t border-slate-700 bg-slate-800 rounded-b-xl space-y-3">
+              <button onClick={handleResetSettings} className="w-full bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/50 font-bold py-2.5 rounded-lg flex items-center justify-center transition text-sm">
+                RESET RATES TO DEFAULT
               </button>
-              <button onClick={handleSaveSettings} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded flex items-center justify-center shadow-md">
+              <button onClick={handleSaveSettings} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center shadow-lg transition">
                 <FaCheck className="mr-2" /> SAVE SETTINGS
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* CUSTOM CONFIRM DIALOG */}
+      {confirmDialog && (
+        <div className="absolute inset-0 bg-black/80 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-xs flex flex-col shadow-2xl overflow-hidden text-center border border-slate-700">
+            <div className="p-6">
+              <h3 className="font-bold text-slate-100 text-lg mb-2">Are you sure?</h3>
+              <p className="text-sm text-slate-400">{confirmDialog.message}</p>
+            </div>
+            <div className="flex border-t border-slate-700">
+              <button onClick={() => setConfirmDialog(null)} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-700 border-r border-slate-700 transition">
+                Cancel
+              </button>
+              <button onClick={confirmDialog.onConfirm} className="flex-1 py-3 text-red-400 font-bold hover:bg-red-900/20 transition">
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM TOAST NOTIFICATION */}
+      {toastMessage && (
+        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-[0_10px_40px_rgba(37,99,235,0.5)] z-[80] font-bold text-sm tracking-wide flex items-center border border-blue-400">
+          <FaCheck className="mr-2" /> {toastMessage}
         </div>
       )}
     </div>
