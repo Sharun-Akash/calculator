@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaCloudUploadAlt, FaCopy, FaCog, FaTimes, FaClipboardList } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
