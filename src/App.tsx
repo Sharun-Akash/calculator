@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
@@ -27,6 +27,7 @@ interface SavedSummary {
   name: string;
   date: string;
   summaryText: string;
+  entries?: EntryItem[]; // Added to store raw data for Grand Totals
 }
 
 const DEFAULT_RATES: Record<string, RateTier[]> = {
@@ -85,6 +86,11 @@ export default function App() {
   const [summaryName, setSummaryName] = useState('');
   const [clearAfterSave, setClearAfterSave] = useState(true);
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
+
+  // Grand Total State
+  const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
+  const [showGrandTotalModal, setShowGrandTotalModal] = useState(false);
+  const [grandTotalText, setGrandTotalText] = useState('');
   
   // Custom Alerts & Confirms State
   const [toastMessage, setToastMessage] = useState('');
@@ -106,7 +112,6 @@ export default function App() {
     setMode('Normal'); 
   }, [category, ratesConfig]);
 
-  // Toast Helper
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
@@ -134,7 +139,7 @@ export default function App() {
       setEntries([newEntry, ...entries]);
       setCurrentInput('');
       setMode('Normal');
-      if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback if supported
+      if (navigator.vibrate) navigator.vibrate(50);
       inputRef.current?.focus();
     }
   };
@@ -167,27 +172,49 @@ export default function App() {
     });
   };
 
-  const generateSummaryText = () => {
+  // Modified to accept custom entries arrays (for Grand Totals) and display quantities
+  const generateSummaryText = (sourceEntries: EntryItem[] = entries, isGrandTotal = false) => {
     const now = new Date();
-    let text = `Time: ${now.toLocaleDateString()} ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}\n\n`;
+    let text = isGrandTotal 
+      ? `GRAND TOTAL REPORT\nGenerated: ${now.toLocaleDateString()} ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}\n\n`
+      : `Time: ${now.toLocaleDateString()} ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}\n\n`;
     
+    let grandColl = 0;
+    let grandBase = 0;
+    let grandComm = 0;
+
     ['1D', '2D', '3D', '4D'].forEach(cat => {
-      const catEntries = entries.filter(e => e.category === cat);
+      const catEntries = sourceEntries.filter(e => e.category === cat);
       if (catEntries.length === 0) return;
       
-      text += `${cat.toLowerCase()}\n`;
+      text += `${cat}\n`;
       const uniqueRates = [...new Set(catEntries.map(e => e.rate))].sort((a, b) => a - b);
       
       uniqueRates.forEach(rate => {
         const group = catEntries.filter(e => e.rate === rate);
+        const totalQty = group.reduce((sum, e) => sum + e.effectiveQty, 0); // Quantity added
         const totalColl = group.reduce((sum, e) => sum + e.itemCollection, 0);
         const totalBase = group.reduce((sum, e) => sum + e.itemBase, 0);
         const totalComm = group.reduce((sum, e) => sum + e.itemCommission, 0);
         
-        text += `Rs.${rate} : ${totalColl} - ${totalBase} = ${totalComm}\n`;
+        grandColl += totalColl;
+        grandBase += totalBase;
+        grandComm += totalComm;
+
+        // Displays Quantity in the format "Rs.10 x 5 Qty :"
+        text += `Rs.${rate} x ${totalQty} Qty : ${totalColl.toFixed(2)} - ${totalBase.toFixed(2)} = ${totalComm.toFixed(2)}\n`;
       });
       text += '\n';
     });
+
+    if (sourceEntries.length > 0) {
+      text += `------------------------\n`;
+      text += `OVERALL TOTALS\n`;
+      text += `Collection: Rs.${grandColl.toFixed(2)}\n`;
+      text += `Base:       Rs.${grandBase.toFixed(2)}\n`;
+      text += `Commission: Rs.${grandComm.toFixed(2)}\n`;
+    }
+
     return text.trim();
   };
 
@@ -221,7 +248,8 @@ export default function App() {
         year: 'numeric', month: 'short', day: 'numeric', 
         hour: '2-digit', minute:'2-digit' 
       }),
-      summaryText: generateSummaryText()
+      summaryText: generateSummaryText(entries),
+      entries: [...entries] // Saving raw entries for later aggregation
     };
     
     setArchives([newArchive, ...archives]);
@@ -238,6 +266,44 @@ export default function App() {
     setArchiveDateFilter(todayStr);
     setShowArchives(true);
     showToast("Summary saved successfully!");
+  };
+
+  const toggleArchiveSelection = (id: string) => {
+    const newSet = new Set(selectedArchives);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedArchives(newSet);
+  };
+
+  const selectAllFiltered = () => {
+    if (selectedArchives.size === filteredArchives.length) {
+      setSelectedArchives(new Set()); // Deselect all
+    } else {
+      const newSet = new Set<string>();
+      filteredArchives.forEach(arc => newSet.add(arc.id));
+      setSelectedArchives(newSet);
+    }
+  };
+
+  const handleGenerateGrandTotal = () => {
+    const selected = archives.filter(arc => selectedArchives.has(arc.id));
+    let combinedEntries: EntryItem[] = [];
+    let missingDataCount = 0;
+
+    selected.forEach(arc => {
+      if (arc.entries && arc.entries.length > 0) {
+        combinedEntries = [...combinedEntries, ...arc.entries];
+      } else {
+        missingDataCount++;
+      }
+    });
+
+    if (missingDataCount > 0) {
+      showToast(`${missingDataCount} older summary(s) didn't contain raw data and were skipped.`);
+    }
+
+    setGrandTotalText(generateSummaryText(combinedEntries, true));
+    setShowGrandTotalModal(true);
   };
 
   const openSettings = () => {
@@ -271,13 +337,8 @@ export default function App() {
     setTempRates(newRates);
   };
 
-  // Data Export / Import Backup Logic
   const handleExportData = () => {
-    const dataToExport = {
-      ratesConfig,
-      entries,
-      archives
-    };
+    const dataToExport = { ratesConfig, entries, archives };
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -296,11 +357,9 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const importedData = JSON.parse(event.target?.result as string);
-        
         if (importedData.ratesConfig) setRatesConfig(importedData.ratesConfig);
         if (importedData.entries) setEntries(importedData.entries);
         if (importedData.archives) setArchives(importedData.archives);
-        
         showToast("Backup restored successfully!");
         setShowSettings(false);
       } catch (error) {
@@ -337,7 +396,7 @@ export default function App() {
       <header className="bg-slate-950 text-slate-100 p-3 shadow-lg z-10 flex justify-between items-center shrink-0 border-b border-slate-800">
         <h1 className="text-lg font-bold tracking-wider truncate text-blue-400">SHARUN'S APP</h1>
         <div className="flex gap-2 shrink-0">
-          <button onClick={() => setShowArchives(true)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
+          <button onClick={() => { setShowArchives(true); setSelectedArchives(new Set()); }} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
             <FaArchive className="mr-1 text-amber-400"/> SAVED
           </button>
           <button onClick={() => setShowSummary(true)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
@@ -530,16 +589,16 @@ export default function App() {
         </div>
       )}
 
-      {/* ARCHIVES MODAL WITH CALENDAR VIEW & WHATSAPP */}
+      {/* ARCHIVES MODAL WITH MULTI-SELECT & GRAND TOTAL */}
       {showArchives && (
         <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[85vh] shadow-2xl border border-slate-700">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col h-[85vh] shadow-2xl border border-slate-700">
             <div className="flex justify-between items-center p-4 border-b border-slate-700">
               <h2 className="font-bold text-lg text-slate-100">Saved Summaries</h2>
               <button onClick={() => setShowArchives(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
             </div>
             
-            <div className="p-4 bg-slate-900 border-b border-slate-700 flex flex-col gap-2">
+            <div className="p-4 bg-slate-900 border-b border-slate-700 flex flex-col gap-3">
               <label className="text-xs font-bold text-amber-500 flex items-center gap-1.5 tracking-wider">
                 <FaCalendarAlt /> FILTER BY DATE
               </label>
@@ -547,9 +606,12 @@ export default function App() {
                 <input 
                   type="date" 
                   value={archiveDateFilter}
-                  onChange={(e) => setArchiveDateFilter(e.target.value)}
+                  onChange={(e) => {
+                    setArchiveDateFilter(e.target.value);
+                    setSelectedArchives(new Set()); // Reset selections on filter change
+                  }}
                   className="flex-1 p-2 bg-slate-800 border border-slate-600 rounded-lg outline-none font-bold text-slate-200 focus:border-blue-500 transition"
-                  style={{ colorScheme: 'dark' }} // Native dark mode calendar picker
+                  style={{ colorScheme: 'dark' }}
                 />
                 {archiveDateFilter && (
                   <button onClick={() => setArchiveDateFilter('')} className="bg-slate-700 hover:bg-slate-600 px-4 rounded-lg text-xs font-bold text-slate-200 transition border border-slate-600">
@@ -557,6 +619,14 @@ export default function App() {
                   </button>
                 )}
               </div>
+              {filteredArchives.length > 0 && (
+                <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-800">
+                  <span className="text-xs font-bold text-slate-400">Selected: {selectedArchives.size}</span>
+                  <button onClick={selectAllFiltered} className="text-xs font-bold text-blue-400 hover:text-blue-300">
+                    {selectedArchives.size === filteredArchives.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="p-4 overflow-y-auto flex-1 space-y-4 bg-slate-900/50">
@@ -569,22 +639,37 @@ export default function App() {
                 </div>
               ) : (
                 filteredArchives.map(arc => (
-                  <div key={arc.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                  <div key={arc.id} className={`bg-slate-800 border ${selectedArchives.has(arc.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-700'} rounded-xl p-4 shadow-sm transition-all`}>
                     <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
-                        <p className="text-[10px] text-slate-400 font-medium mt-0.5">{arc.date}</p>
+                      <div 
+                        className="flex items-start gap-3 flex-1 cursor-pointer" 
+                        onClick={() => toggleArchiveSelection(arc.id)}
+                      >
+                        <input 
+                          type="checkbox" 
+                          checked={selectedArchives.has(arc.id)}
+                          onChange={() => {}} // Handled by div wrapper for bigger hit area
+                          className="mt-1 w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 pointer-events-none"
+                        />
+                        <div>
+                          <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
+                          <p className="text-[10px] text-slate-400 font-medium mt-0.5">{arc.date}</p>
+                        </div>
                       </div>
-                      <button onClick={() => {
+                      <button onClick={(e) => {
+                        e.stopPropagation();
                         setConfirmDialog({
                           message: `Delete saved summary "${arc.name}"?`,
                           onConfirm: () => {
                             setArchives(archives.filter(a => a.id !== arc.id));
+                            const newSet = new Set(selectedArchives);
+                            newSet.delete(arc.id);
+                            setSelectedArchives(newSet);
                             setConfirmDialog(null);
                             showToast("Summary deleted");
                           }
                         });
-                      }} className="text-red-400/80 hover:text-red-400 transition mt-1 bg-slate-900 p-2 rounded-lg"><FaTrash /></button>
+                      }} className="text-red-400/80 hover:text-red-400 transition mt-1 bg-slate-900 p-2 rounded-lg ml-2"><FaTrash /></button>
                     </div>
                     <pre className="text-xs bg-slate-900 p-3 border border-slate-700 rounded-lg text-slate-300 font-mono mb-3 whitespace-pre-wrap shadow-inner">{arc.summaryText}</pre>
                     <div className="flex gap-2">
@@ -598,6 +683,43 @@ export default function App() {
                   </div>
                 ))
               )}
+            </div>
+            
+            {/* Action Bar for Grand Total */}
+            {selectedArchives.size >= 2 && (
+              <div className="p-4 border-t border-slate-700 bg-slate-800/90 rounded-b-xl backdrop-blur-sm">
+                <button 
+                  onClick={handleGenerateGrandTotal} 
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(79,70,229,0.4)] transition uppercase tracking-wide text-sm"
+                >
+                  <FaLayerGroup className="mr-2" /> Combine {selectedArchives.size} Summaries
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* GRAND TOTAL MODAL */}
+      {showGrandTotalModal && (
+        <div className="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[80vh] shadow-2xl border border-indigo-500/50 ring-1 ring-indigo-500">
+            <div className="flex justify-between items-center p-4 border-b border-slate-700 bg-indigo-900/20 rounded-t-xl">
+              <h2 className="font-bold text-lg text-indigo-400 flex items-center"><FaLayerGroup className="mr-2" /> Grand Total</h2>
+              <button onClick={() => setShowGrandTotalModal(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <pre className="text-sm bg-slate-900 p-4 border border-slate-700 rounded-lg text-slate-300 whitespace-pre-wrap font-mono shadow-inner">
+                {grandTotalText}
+              </pre>
+            </div>
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 flex gap-3 rounded-b-xl">
+              <button onClick={() => copyToClipboard(grandTotalText)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm border border-slate-600">
+                <FaCopy className="mr-2" /> COPY
+              </button>
+              <button onClick={() => shareToWhatsApp(grandTotalText)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm">
+                <FaWhatsapp className="mr-2 text-lg" /> SHARE
+              </button>
             </div>
           </div>
         </div>
