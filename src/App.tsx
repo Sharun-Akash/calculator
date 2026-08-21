@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup, FaBoxOpen } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaMinus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup, FaBoxOpen, FaTags } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
@@ -73,7 +73,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [currentInput, setCurrentInput] = useState('');
+  const [currentQty, setCurrentQty] = useState<number>(0);
   const [category, setCategory] = useState('3D');
   const [collectionRate, setCollectionRate] = useState(22.00);
   const [mode, setMode] = useState<Mode>('Normal');
@@ -87,7 +87,7 @@ export default function App() {
   const [summaryName, setSummaryName] = useState('');
   const [clearAfterSave, setClearAfterSave] = useState(true);
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
-  const [archiveTab, setArchiveTab] = useState<'Normal' | 'Grand'>('Normal'); // NEW: Tabs state
+  const [archiveTab, setArchiveTab] = useState<'Normal' | 'Grand'>('Normal');
 
   // Grand Total State
   const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
@@ -111,7 +111,7 @@ export default function App() {
     localStorage.setItem('archives', JSON.stringify(archives));
   }, [archives]);
 
-  // Generates ordered rates (1D, 2D, 3D, 4D format) for the price dropdown
+  // Generates ordered rates (1D, 2D, 3D, 4D format) for the touchboxes
   const allOrderedRates = Object.entries(ratesConfig).flatMap(([cat, rates]) => 
     rates.map(r => ({ cat, rate: r.coll }))
   );
@@ -123,9 +123,8 @@ export default function App() {
 
   const handleAdd = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const qty = parseInt(currentInput);
     
-    if (!isNaN(qty) && qty > 0) {
+    if (currentQty > 0) {
       let currentRateObj = ratesConfig[category]?.find(r => r.coll === collectionRate);
       if (!currentRateObj) {
         currentRateObj = Object.values(ratesConfig).flat().find(r => r.coll === collectionRate);
@@ -134,21 +133,20 @@ export default function App() {
       const baseRate = currentRateObj ? currentRateObj.base : (collectionRate * 0.85);
       const multiplier = MULTIPLIERS[mode] || 1;
 
-      const effectiveQty = qty * multiplier;
+      const effectiveQty = currentQty * multiplier;
       const itemCollection = Math.round((effectiveQty * collectionRate) * 100) / 100;
       const itemBase = Math.round((effectiveQty * baseRate) * 100) / 100;
       const itemCommission = Math.round((itemCollection - itemBase) * 100) / 100;
 
       const newEntry: EntryItem = {
         id: Date.now(), category, rate: collectionRate, baseRate, mode,
-        originalQty: qty, multiplier, effectiveQty, itemCollection, itemBase, itemCommission
+        originalQty: currentQty, multiplier, effectiveQty, itemCollection, itemBase, itemCommission
       };
 
       setEntries([newEntry, ...entries]);
-      setCurrentInput('');
+      setCurrentQty(0); // Reset to base quantity 0 after adding
       setMode('Normal'); 
       if (navigator.vibrate) navigator.vibrate(50);
-      inputRef.current?.focus();
     }
   };
 
@@ -271,7 +269,7 @@ export default function App() {
       setShowSavePrompt(false);
       setShowGrandTotalModal(false);
       setSelectedArchives(new Set()); 
-      setArchiveTab('Grand'); // Switch to Grand tab automatically after saving one
+      setArchiveTab('Grand'); 
       showToast("Grand Total saved successfully!");
 
     } else {
@@ -295,7 +293,7 @@ export default function App() {
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       setArchiveDateFilter(todayStr);
-      setArchiveTab('Normal'); // Switch to Normal tab automatically
+      setArchiveTab('Normal'); 
       setShowArchives(true);
       showToast("Summary saved successfully!");
     }
@@ -412,17 +410,25 @@ export default function App() {
     return modes;
   };
 
-  // Filter Archives by Date AND Tab State (Normal vs Grand)
+  // Helper for Price Touchbox Colors
+  const getCatStyles = (cat: string, isSelected: boolean) => {
+    switch (cat) {
+      case '1D': return isSelected ? 'bg-rose-600 border-rose-400 text-white shadow-md' : 'border-rose-900/60 text-rose-400 bg-slate-900 hover:bg-rose-900/30';
+      case '2D': return isSelected ? 'bg-emerald-600 border-emerald-400 text-white shadow-md' : 'border-emerald-900/60 text-emerald-400 bg-slate-900 hover:bg-emerald-900/30';
+      case '3D': return isSelected ? 'bg-blue-600 border-blue-400 text-white shadow-md' : 'border-blue-900/60 text-blue-400 bg-slate-900 hover:bg-blue-900/30';
+      case '4D': return isSelected ? 'bg-purple-600 border-purple-400 text-white shadow-md' : 'border-purple-900/60 text-purple-400 bg-slate-900 hover:bg-purple-900/30';
+      default: return isSelected ? 'bg-slate-600 border-slate-400 text-white shadow-md' : 'border-slate-700 text-slate-400 hover:bg-slate-800';
+    }
+  };
+
   const filteredArchives = archives.filter(arc => {
     if (archiveDateFilter) {
       const arcDate = new Date(parseInt(arc.id));
       const arcDateString = `${arcDate.getFullYear()}-${String(arcDate.getMonth() + 1).padStart(2, '0')}-${String(arcDate.getDate()).padStart(2, '0')}`;
       if (arcDateString !== archiveDateFilter) return false;
     }
-    
     if (archiveTab === 'Normal' && arc.isGrandTotal) return false;
     if (archiveTab === 'Grand' && !arc.isGrandTotal) return false;
-
     return true;
   });
 
@@ -449,52 +455,33 @@ export default function App() {
         </div>
       </header>
 
-      {/* FILTERS & MODE CHECKLIST */}
+      {/* TOUCHBOX PRICES & MODES */}
       <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10 flex flex-col gap-3">
-        <div className="flex gap-2 text-sm">
-          {/* Price Selector (Ordered with Category Labels) */}
-          <div className="flex-1">
-            <label className="text-[10px] text-slate-400 font-bold mb-1 block">PRICE (₹)</label>
-            <select 
-              className="w-full p-2.5 rounded bg-slate-900 text-blue-400 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
-              value={`${category}-${collectionRate}`} 
-              onChange={(e) => {
-                const [newCat, newRateStr] = e.target.value.split('-');
-                setCategory(newCat);
-                setCollectionRate(Number(newRateStr));
-              }}
-            >
-              {allOrderedRates.map((item, i) => (
-                <option key={i} value={`${item.cat}-${item.rate}`}>
-                  ₹{item.rate.toFixed(2)} ({item.cat})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Manual Category Override */}
-          <div className="w-1/3">
-            <label className="text-[10px] text-slate-400 font-bold mb-1 block">CAT</label>
-            <select 
-              className="w-full p-2.5 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
-              value={category} 
-              onChange={(e) => {
-                const newCat = e.target.value;
-                setCategory(newCat);
-                // When cat manually changes, auto-switch rate to first item in that cat
-                if (ratesConfig[newCat] && ratesConfig[newCat].length > 0) {
-                  setCollectionRate(ratesConfig[newCat][0].coll);
-                }
-              }}
-            >
-              {Object.keys(ratesConfig).map(cat => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
+        
+        {/* Price Touchboxes */}
+        <div>
+          <label className="text-[10px] text-slate-400 font-bold mb-2 flex items-center gap-1 uppercase tracking-wider"><FaTags /> PRICE & CATEGORY</label>
+          <div className="flex flex-wrap gap-2">
+            {allOrderedRates.map((item, i) => {
+              const isSelected = (category === item.cat && collectionRate === item.rate);
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => { setCategory(item.cat); setCollectionRate(item.rate); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-sm border-2 transition-all flex flex-col items-center justify-center min-w-[64px] ${getCatStyles(item.cat, isSelected)}`}
+                >
+                  ₹{item.rate.toFixed(1)}
+                  <span className={`block text-[9px] ${isSelected ? 'opacity-100 font-black' : 'opacity-60'}`}>{item.cat}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
         {/* Mode Checklist (Chips) */}
         <div>
-          <label className="text-[10px] text-slate-400 font-bold mb-1.5 flex items-center gap-1"><FaBoxOpen /> SELECT MODE</label>
+          <label className="text-[10px] text-slate-400 font-bold mb-1.5 flex items-center gap-1 uppercase tracking-wider"><FaBoxOpen /> SELECT MODE</label>
           <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
             {getAvailableModes().map(m => (
               <button
@@ -514,19 +501,39 @@ export default function App() {
         </div>
       </div>
 
-      {/* INPUT AREA */}
+      {/* INPUT AREA WITH STEPPER ARROWS */}
       <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg border-b border-slate-700">
-        <form onSubmit={handleAdd} className="flex gap-2">
-          <input 
-            ref={inputRef} 
-            type="number" 
-            className="flex-1 text-xl p-2.5 bg-slate-900 border border-slate-600 rounded-lg text-center font-bold text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition placeholder-slate-500 shadow-inner" 
-            placeholder="Enter Quantity" 
-            value={currentInput} 
-            onChange={(e) => setCurrentInput(e.target.value)} 
-          />
-          <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-6 rounded-lg text-lg font-bold shadow-md transition">
-            <FaPlus className="inline mr-1" /> ADD
+        <form onSubmit={handleAdd} className="flex gap-2 items-stretch h-12">
+          
+          <div className="flex-1 flex items-stretch bg-slate-900 border border-slate-600 rounded-lg shadow-inner overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
+            <button 
+              type="button" 
+              onClick={() => setCurrentQty(Math.max(0, currentQty - 1))} 
+              className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-r border-slate-700"
+            >
+              <FaMinus />
+            </button>
+            
+            <input 
+              ref={inputRef} 
+              type="number" 
+              className="flex-1 w-full text-xl bg-transparent text-center font-bold text-slate-100 outline-none" 
+              placeholder="0" 
+              value={currentQty === 0 ? '' : currentQty} 
+              onChange={(e) => setCurrentQty(parseInt(e.target.value) || 0)} 
+            />
+            
+            <button 
+              type="button" 
+              onClick={() => setCurrentQty(currentQty + 1)} 
+              className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-l border-slate-700"
+            >
+              <FaPlus />
+            </button>
+          </div>
+
+          <button type="submit" disabled={currentQty === 0} className={`px-6 rounded-lg text-lg font-bold shadow-md transition flex items-center ${currentQty > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 text-slate-400 opacity-70'}`}>
+            <FaPlus className="mr-1" /> ADD
           </button>
         </form>
       </div>
@@ -579,9 +586,11 @@ export default function App() {
                 entries.map((entry) => (
                   <tr key={entry.id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition">
                     <td className="px-2 py-3">
-                      <div className="font-bold text-slate-200">{entry.category}</div>
+                      <div className={`font-bold ${entry.category === '1D' ? 'text-rose-400' : entry.category === '2D' ? 'text-emerald-400' : entry.category === '3D' ? 'text-blue-400' : 'text-purple-400'}`}>
+                        {entry.category}
+                      </div>
                       <div className="text-[10px] text-slate-400">₹{entry.rate}</div>
-                      {entry.mode !== 'Normal' && <div className="text-[9px] text-blue-400 font-bold mt-0.5">{entry.mode}</div>}
+                      {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-300 font-bold mt-0.5">{entry.mode}</div>}
                     </td>
                     <td className="px-2 py-3 text-center">
                       <input 
