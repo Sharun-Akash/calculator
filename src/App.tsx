@@ -28,7 +28,7 @@ interface SavedSummary {
   date: string;
   summaryText: string;
   entries?: EntryItem[];
-  isGrandTotal?: boolean; // Flag to identify grand totals
+  isGrandTotal?: boolean;
 }
 
 const DEFAULT_RATES: Record<string, RateTier[]> = {
@@ -87,6 +87,7 @@ export default function App() {
   const [summaryName, setSummaryName] = useState('');
   const [clearAfterSave, setClearAfterSave] = useState(true);
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
+  const [archiveTab, setArchiveTab] = useState<'Normal' | 'Grand'>('Normal'); // NEW: Tabs state
 
   // Grand Total State
   const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
@@ -110,25 +111,14 @@ export default function App() {
     localStorage.setItem('archives', JSON.stringify(archives));
   }, [archives]);
 
-  // Extract all unique prices globally for the new dropdown
-  const allUniqueRates = Array.from(
-    new Set(Object.values(ratesConfig).flat().map(r => r.coll))
-  ).sort((a, b) => a - b);
+  // Generates ordered rates (1D, 2D, 3D, 4D format) for the price dropdown
+  const allOrderedRates = Object.entries(ratesConfig).flatMap(([cat, rates]) => 
+    rates.map(r => ({ cat, rate: r.coll }))
+  );
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
-  };
-
-  const handleRateSelection = (newRate: number) => {
-    setCollectionRate(newRate);
-    // Auto-change the category based on the selected rate
-    for (const cat in ratesConfig) {
-      if (ratesConfig[cat].some(r => r.coll === newRate)) {
-        setCategory(cat);
-        break;
-      }
-    }
   };
 
   const handleAdd = (e?: React.FormEvent) => {
@@ -136,13 +126,12 @@ export default function App() {
     const qty = parseInt(currentInput);
     
     if (!isNaN(qty) && qty > 0) {
-      // Find base rate (check current category first, then fallback globally)
       let currentRateObj = ratesConfig[category]?.find(r => r.coll === collectionRate);
       if (!currentRateObj) {
         currentRateObj = Object.values(ratesConfig).flat().find(r => r.coll === collectionRate);
       }
       
-      const baseRate = currentRateObj ? currentRateObj.base : (collectionRate * 0.85); // 15% margin fallback
+      const baseRate = currentRateObj ? currentRateObj.base : (collectionRate * 0.85);
       const multiplier = MULTIPLIERS[mode] || 1;
 
       const effectiveQty = qty * multiplier;
@@ -157,7 +146,7 @@ export default function App() {
 
       setEntries([newEntry, ...entries]);
       setCurrentInput('');
-      setMode('Normal'); // Reset mode after adding for speed
+      setMode('Normal'); 
       if (navigator.vibrate) navigator.vibrate(50);
       inputRef.current?.focus();
     }
@@ -281,7 +270,8 @@ export default function App() {
       setArchives([newArchive, ...archives]);
       setShowSavePrompt(false);
       setShowGrandTotalModal(false);
-      setSelectedArchives(new Set()); // Deselect all after saving
+      setSelectedArchives(new Set()); 
+      setArchiveTab('Grand'); // Switch to Grand tab automatically after saving one
       showToast("Grand Total saved successfully!");
 
     } else {
@@ -305,6 +295,7 @@ export default function App() {
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       setArchiveDateFilter(todayStr);
+      setArchiveTab('Normal'); // Switch to Normal tab automatically
       setShowArchives(true);
       showToast("Summary saved successfully!");
     }
@@ -421,11 +412,18 @@ export default function App() {
     return modes;
   };
 
+  // Filter Archives by Date AND Tab State (Normal vs Grand)
   const filteredArchives = archives.filter(arc => {
-    if (!archiveDateFilter) return true;
-    const arcDate = new Date(parseInt(arc.id));
-    const arcDateString = `${arcDate.getFullYear()}-${String(arcDate.getMonth() + 1).padStart(2, '0')}-${String(arcDate.getDate()).padStart(2, '0')}`;
-    return arcDateString === archiveDateFilter;
+    if (archiveDateFilter) {
+      const arcDate = new Date(parseInt(arc.id));
+      const arcDateString = `${arcDate.getFullYear()}-${String(arcDate.getMonth() + 1).padStart(2, '0')}-${String(arcDate.getDate()).padStart(2, '0')}`;
+      if (arcDateString !== archiveDateFilter) return false;
+    }
+    
+    if (archiveTab === 'Normal' && arc.isGrandTotal) return false;
+    if (archiveTab === 'Grand' && !arc.isGrandTotal) return false;
+
+    return true;
   });
 
   const totalCollection = entries.reduce((sum, item) => sum + item.itemCollection, 0);
@@ -454,15 +452,23 @@ export default function App() {
       {/* FILTERS & MODE CHECKLIST */}
       <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10 flex flex-col gap-3">
         <div className="flex gap-2 text-sm">
-          {/* Global Price Selector */}
+          {/* Price Selector (Ordered with Category Labels) */}
           <div className="flex-1">
             <label className="text-[10px] text-slate-400 font-bold mb-1 block">PRICE (₹)</label>
             <select 
               className="w-full p-2.5 rounded bg-slate-900 text-blue-400 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
-              value={collectionRate} 
-              onChange={(e) => handleRateSelection(Number(e.target.value))}
+              value={`${category}-${collectionRate}`} 
+              onChange={(e) => {
+                const [newCat, newRateStr] = e.target.value.split('-');
+                setCategory(newCat);
+                setCollectionRate(Number(newRateStr));
+              }}
             >
-              {allUniqueRates.map((rate, i) => <option key={i} value={rate}>₹{rate.toFixed(2)}</option>)}
+              {allOrderedRates.map((item, i) => (
+                <option key={i} value={`${item.cat}-${item.rate}`}>
+                  ₹{item.rate.toFixed(2)} ({item.cat})
+                </option>
+              ))}
             </select>
           </div>
 
@@ -472,7 +478,14 @@ export default function App() {
             <select 
               className="w-full p-2.5 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
               value={category} 
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                const newCat = e.target.value;
+                setCategory(newCat);
+                // When cat manually changes, auto-switch rate to first item in that cat
+                if (ratesConfig[newCat] && ratesConfig[newCat].length > 0) {
+                  setCollectionRate(ratesConfig[newCat][0].coll);
+                }
+              }}
             >
               {Object.keys(ratesConfig).map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
@@ -673,16 +686,32 @@ export default function App() {
         </div>
       )}
 
-      {/* ARCHIVES MODAL WITH MULTI-SELECT & GRAND TOTAL */}
+      {/* ARCHIVES MODAL WITH MULTI-SELECT, TABS & GRAND TOTAL */}
       {showArchives && (
         <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col h-[85vh] shadow-2xl border border-slate-700">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col h-[85vh] shadow-2xl border border-slate-700 overflow-hidden">
             <div className="flex justify-between items-center p-4 border-b border-slate-700">
               <h2 className="font-bold text-lg text-slate-100">Saved Summaries</h2>
               <button onClick={() => setShowArchives(false)} className="text-slate-400 hover:text-slate-200 text-xl transition"><FaTimes /></button>
             </div>
             
-            <div className="p-4 bg-slate-900 border-b border-slate-700 flex flex-col gap-3">
+            {/* TABS (NORMAL / GRAND TOTAL) */}
+            <div className="flex border-b border-slate-700 bg-slate-900 shrink-0">
+              <button 
+                className={`flex-1 py-3 text-sm font-bold transition-all ${archiveTab === 'Normal' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800/50' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'}`}
+                onClick={() => { setArchiveTab('Normal'); setSelectedArchives(new Set()); }}
+              >
+                NORMAL
+              </button>
+              <button 
+                className={`flex-1 py-3 text-sm font-bold transition-all ${archiveTab === 'Grand' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800/50' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'}`}
+                onClick={() => { setArchiveTab('Grand'); setSelectedArchives(new Set()); }}
+              >
+                GRAND TOTALS
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-900 border-b border-slate-700 flex flex-col gap-3 shrink-0">
               <label className="text-xs font-bold text-amber-500 flex items-center gap-1.5 tracking-wider">
                 <FaCalendarAlt /> FILTER BY DATE
               </label>
@@ -703,7 +732,7 @@ export default function App() {
                   </button>
                 )}
               </div>
-              {filteredArchives.length > 0 && (
+              {filteredArchives.length > 0 && archiveTab === 'Normal' && (
                 <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-800">
                   <span className="text-xs font-bold text-slate-400">Selected: {selectedArchives.size}</span>
                   <button onClick={selectAllFiltered} className="text-xs font-bold text-blue-400 hover:text-blue-300">
@@ -714,11 +743,11 @@ export default function App() {
             </div>
 
             <div className="p-4 overflow-y-auto flex-1 space-y-4 bg-slate-900/50">
-              {archives.length === 0 ? (
-                <p className="text-center text-slate-500 py-8 italic font-medium">No saved summaries yet.</p>
+              {archives.filter(arc => archiveTab === 'Normal' ? !arc.isGrandTotal : arc.isGrandTotal).length === 0 ? (
+                <p className="text-center text-slate-500 py-8 italic font-medium">No {archiveTab.toLowerCase()} summaries saved yet.</p>
               ) : filteredArchives.length === 0 ? (
                 <div className="text-center py-10">
-                  <p className="text-slate-400 font-bold">No bills saved on this date.</p>
+                  <p className="text-slate-400 font-bold">No {archiveTab.toLowerCase()} summaries on this date.</p>
                   <button onClick={() => setArchiveDateFilter('')} className="text-blue-400 text-sm mt-3 font-bold hover:underline">View All Dates</button>
                 </div>
               ) : (
@@ -726,15 +755,17 @@ export default function App() {
                   <div key={arc.id} className={`bg-slate-800 border ${selectedArchives.has(arc.id) ? 'border-blue-500 ring-1 ring-blue-500' : arc.isGrandTotal ? 'border-indigo-500/50' : 'border-slate-700'} rounded-xl p-4 shadow-sm transition-all`}>
                     <div className="flex justify-between items-start mb-3">
                       <div 
-                        className="flex items-start gap-3 flex-1 cursor-pointer" 
-                        onClick={() => toggleArchiveSelection(arc.id)}
+                        className={`flex items-start gap-3 flex-1 ${archiveTab === 'Normal' ? 'cursor-pointer' : ''}`} 
+                        onClick={() => archiveTab === 'Normal' && toggleArchiveSelection(arc.id)}
                       >
-                        <input 
-                          type="checkbox" 
-                          checked={selectedArchives.has(arc.id)}
-                          onChange={() => {}} 
-                          className="mt-1 w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 pointer-events-none"
-                        />
+                        {archiveTab === 'Normal' && (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedArchives.has(arc.id)}
+                            onChange={() => {}} 
+                            className="mt-1 w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 pointer-events-none"
+                          />
+                        )}
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
@@ -772,9 +803,9 @@ export default function App() {
               )}
             </div>
             
-            {/* Action Bar for Grand Total */}
-            {selectedArchives.size >= 2 && (
-              <div className="p-4 border-t border-slate-700 bg-slate-800/90 rounded-b-xl backdrop-blur-sm">
+            {/* Action Bar for Grand Total Selection (Only in Normal Tab) */}
+            {archiveTab === 'Normal' && selectedArchives.size >= 2 && (
+              <div className="p-4 border-t border-slate-700 bg-slate-800/90 rounded-b-xl backdrop-blur-sm shrink-0">
                 <button 
                   onClick={handleGenerateGrandTotal} 
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(79,70,229,0.4)] transition uppercase tracking-wide text-sm"
@@ -787,7 +818,7 @@ export default function App() {
         </div>
       )}
 
-      {/* GRAND TOTAL MODAL */}
+      {/* GRAND TOTAL PREVIEW MODAL */}
       {showGrandTotalModal && (
         <div className="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[80vh] shadow-2xl border border-indigo-500/50 ring-1 ring-indigo-500">
@@ -817,7 +848,7 @@ export default function App() {
         </div>
       )}
 
-      {/* SETTINGS MODAL (Unchanged but included for completeness) */}
+      {/* SETTINGS MODAL */}
       {showSettings && (
         <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[90vh] shadow-2xl border border-slate-700">
