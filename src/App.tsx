@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup, FaBoxOpen } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
@@ -27,7 +27,8 @@ interface SavedSummary {
   name: string;
   date: string;
   summaryText: string;
-  entries?: EntryItem[]; // Added to store raw data for Grand Totals
+  entries?: EntryItem[];
+  isGrandTotal?: boolean; // Flag to identify grand totals
 }
 
 const DEFAULT_RATES: Record<string, RateTier[]> = {
@@ -74,7 +75,7 @@ export default function App() {
 
   const [currentInput, setCurrentInput] = useState('');
   const [category, setCategory] = useState('3D');
-  const [collectionRate, setCollectionRate] = useState(ratesConfig['3D'][0].coll);
+  const [collectionRate, setCollectionRate] = useState(22.00);
   const [mode, setMode] = useState<Mode>('Normal');
   
   const [showSummary, setShowSummary] = useState(false);
@@ -91,6 +92,8 @@ export default function App() {
   const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
   const [showGrandTotalModal, setShowGrandTotalModal] = useState(false);
   const [grandTotalText, setGrandTotalText] = useState('');
+  const [grandTotalEntries, setGrandTotalEntries] = useState<EntryItem[]>([]);
+  const [isSavingGrandTotal, setIsSavingGrandTotal] = useState(false);
   
   // Custom Alerts & Confirms State
   const [toastMessage, setToastMessage] = useState('');
@@ -107,14 +110,25 @@ export default function App() {
     localStorage.setItem('archives', JSON.stringify(archives));
   }, [archives]);
 
-  useEffect(() => {
-    setCollectionRate(ratesConfig[category][0].coll);
-    setMode('Normal'); 
-  }, [category, ratesConfig]);
+  // Extract all unique prices globally for the new dropdown
+  const allUniqueRates = Array.from(
+    new Set(Object.values(ratesConfig).flat().map(r => r.coll))
+  ).sort((a, b) => a - b);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const handleRateSelection = (newRate: number) => {
+    setCollectionRate(newRate);
+    // Auto-change the category based on the selected rate
+    for (const cat in ratesConfig) {
+      if (ratesConfig[cat].some(r => r.coll === newRate)) {
+        setCategory(cat);
+        break;
+      }
+    }
   };
 
   const handleAdd = (e?: React.FormEvent) => {
@@ -122,8 +136,13 @@ export default function App() {
     const qty = parseInt(currentInput);
     
     if (!isNaN(qty) && qty > 0) {
-      const currentRateObj = ratesConfig[category].find(r => r.coll === collectionRate) || ratesConfig[category][0];
-      const baseRate = currentRateObj.base;
+      // Find base rate (check current category first, then fallback globally)
+      let currentRateObj = ratesConfig[category]?.find(r => r.coll === collectionRate);
+      if (!currentRateObj) {
+        currentRateObj = Object.values(ratesConfig).flat().find(r => r.coll === collectionRate);
+      }
+      
+      const baseRate = currentRateObj ? currentRateObj.base : (collectionRate * 0.85); // 15% margin fallback
       const multiplier = MULTIPLIERS[mode] || 1;
 
       const effectiveQty = qty * multiplier;
@@ -138,7 +157,7 @@ export default function App() {
 
       setEntries([newEntry, ...entries]);
       setCurrentInput('');
-      setMode('Normal');
+      setMode('Normal'); // Reset mode after adding for speed
       if (navigator.vibrate) navigator.vibrate(50);
       inputRef.current?.focus();
     }
@@ -172,7 +191,6 @@ export default function App() {
     });
   };
 
-  // Modified to accept custom entries arrays (for Grand Totals) and display quantities
   const generateSummaryText = (sourceEntries: EntryItem[] = entries, isGrandTotal = false) => {
     const now = new Date();
     let text = isGrandTotal 
@@ -192,7 +210,7 @@ export default function App() {
       
       uniqueRates.forEach(rate => {
         const group = catEntries.filter(e => e.rate === rate);
-        const totalQty = group.reduce((sum, e) => sum + e.effectiveQty, 0); // Quantity added
+        const totalQty = group.reduce((sum, e) => sum + e.effectiveQty, 0);
         const totalColl = group.reduce((sum, e) => sum + e.itemCollection, 0);
         const totalBase = group.reduce((sum, e) => sum + e.itemBase, 0);
         const totalComm = group.reduce((sum, e) => sum + e.itemCommission, 0);
@@ -201,7 +219,6 @@ export default function App() {
         grandBase += totalBase;
         grandComm += totalComm;
 
-        // Displays Quantity in the format "Rs.10 x 5 Qty :"
         text += `Rs.${rate} x ${totalQty} Qty : ${totalColl.toFixed(2)} - ${totalBase.toFixed(2)} = ${totalComm.toFixed(2)}\n`;
       });
       text += '\n';
@@ -230,7 +247,14 @@ export default function App() {
 
   const initiateSaveArchive = () => {
     if (entries.length === 0) return showToast("No entries to save.");
+    setIsSavingGrandTotal(false);
     setSummaryName('');
+    setShowSavePrompt(true);
+  };
+
+  const initiateSaveGrandTotal = () => {
+    setIsSavingGrandTotal(true);
+    setSummaryName(`Grand Total (${selectedArchives.size} Files)`);
     setShowSavePrompt(true);
   };
 
@@ -241,31 +265,49 @@ export default function App() {
       return;
     }
     
-    const newArchive: SavedSummary = {
-      id: Date.now().toString(),
-      name: summaryName.trim(),
-      date: new Date().toLocaleString([], { 
-        year: 'numeric', month: 'short', day: 'numeric', 
-        hour: '2-digit', minute:'2-digit' 
-      }),
-      summaryText: generateSummaryText(entries),
-      entries: [...entries] // Saving raw entries for later aggregation
-    };
-    
-    setArchives([newArchive, ...archives]);
-    
-    if (clearAfterSave) {
-      setEntries([]);
-    }
+    if (isSavingGrandTotal) {
+      const newArchive: SavedSummary = {
+        id: Date.now().toString(),
+        name: summaryName.trim(),
+        date: new Date().toLocaleString([], { 
+          year: 'numeric', month: 'short', day: 'numeric', 
+          hour: '2-digit', minute:'2-digit' 
+        }),
+        summaryText: grandTotalText,
+        entries: grandTotalEntries,
+        isGrandTotal: true
+      };
+      
+      setArchives([newArchive, ...archives]);
+      setShowSavePrompt(false);
+      setShowGrandTotalModal(false);
+      setSelectedArchives(new Set()); // Deselect all after saving
+      showToast("Grand Total saved successfully!");
 
-    setShowSavePrompt(false);
-    setShowSummary(false);
-    
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    setArchiveDateFilter(todayStr);
-    setShowArchives(true);
-    showToast("Summary saved successfully!");
+    } else {
+      const newArchive: SavedSummary = {
+        id: Date.now().toString(),
+        name: summaryName.trim(),
+        date: new Date().toLocaleString([], { 
+          year: 'numeric', month: 'short', day: 'numeric', 
+          hour: '2-digit', minute:'2-digit' 
+        }),
+        summaryText: generateSummaryText(entries),
+        entries: [...entries]
+      };
+      
+      setArchives([newArchive, ...archives]);
+      if (clearAfterSave) setEntries([]);
+      
+      setShowSavePrompt(false);
+      setShowSummary(false);
+      
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      setArchiveDateFilter(todayStr);
+      setShowArchives(true);
+      showToast("Summary saved successfully!");
+    }
   };
 
   const toggleArchiveSelection = (id: string) => {
@@ -277,7 +319,7 @@ export default function App() {
 
   const selectAllFiltered = () => {
     if (selectedArchives.size === filteredArchives.length) {
-      setSelectedArchives(new Set()); // Deselect all
+      setSelectedArchives(new Set()); 
     } else {
       const newSet = new Set<string>();
       filteredArchives.forEach(arc => newSet.add(arc.id));
@@ -302,6 +344,7 @@ export default function App() {
       showToast(`${missingDataCount} older summary(s) didn't contain raw data and were skipped.`);
     }
 
+    setGrandTotalEntries(combinedEntries);
     setGrandTotalText(generateSummaryText(combinedEntries, true));
     setShowGrandTotalModal(true);
   };
@@ -408,33 +451,68 @@ export default function App() {
         </div>
       </header>
 
-      {/* FILTERS */}
-      <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10">
-        <div className="grid grid-cols-3 gap-2 text-sm">
-          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {Object.keys(ratesConfig).map(cat => <option key={cat} value={cat}>{cat}</option>)}
-          </select>
-          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={collectionRate} onChange={(e) => setCollectionRate(Number(e.target.value))}>
-            {ratesConfig[category].map((rate, i) => <option key={i} value={rate.coll}>₹{rate.coll}</option>)}
-          </select>
-          <select className="p-2 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-            {getAvailableModes().map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+      {/* FILTERS & MODE CHECKLIST */}
+      <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10 flex flex-col gap-3">
+        <div className="flex gap-2 text-sm">
+          {/* Global Price Selector */}
+          <div className="flex-1">
+            <label className="text-[10px] text-slate-400 font-bold mb-1 block">PRICE (₹)</label>
+            <select 
+              className="w-full p-2.5 rounded bg-slate-900 text-blue-400 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
+              value={collectionRate} 
+              onChange={(e) => handleRateSelection(Number(e.target.value))}
+            >
+              {allUniqueRates.map((rate, i) => <option key={i} value={rate}>₹{rate.toFixed(2)}</option>)}
+            </select>
+          </div>
+
+          {/* Manual Category Override */}
+          <div className="w-1/3">
+            <label className="text-[10px] text-slate-400 font-bold mb-1 block">CAT</label>
+            <select 
+              className="w-full p-2.5 rounded bg-slate-900 text-slate-100 border border-slate-700 font-bold outline-none focus:border-blue-500 transition shadow-inner" 
+              value={category} 
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              {Object.keys(ratesConfig).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Mode Checklist (Chips) */}
+        <div>
+          <label className="text-[10px] text-slate-400 font-bold mb-1.5 flex items-center gap-1"><FaBoxOpen /> SELECT MODE</label>
+          <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+            {getAvailableModes().map(m => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all border shadow-sm ${
+                  mode === m 
+                    ? 'bg-blue-600 text-white border-blue-400' 
+                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* INPUT AREA */}
-      <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg">
+      <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg border-b border-slate-700">
         <form onSubmit={handleAdd} className="flex gap-2">
           <input 
             ref={inputRef} 
             type="number" 
-            className="flex-1 text-xl p-2 bg-slate-900 border border-slate-700 rounded text-center font-bold text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition placeholder-slate-500" 
+            className="flex-1 text-xl p-2.5 bg-slate-900 border border-slate-600 rounded-lg text-center font-bold text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition placeholder-slate-500 shadow-inner" 
             placeholder="Enter Quantity" 
             value={currentInput} 
             onChange={(e) => setCurrentInput(e.target.value)} 
           />
-          <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-5 rounded text-lg font-bold shadow-md transition">
+          <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-6 rounded-lg text-lg font-bold shadow-md transition">
             <FaPlus className="inline mr-1" /> ADD
           </button>
         </form>
@@ -552,7 +630,9 @@ export default function App() {
         <div className="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-800 rounded-xl w-full max-w-xs flex flex-col shadow-2xl border border-slate-700">
             <div className="p-4 border-b border-slate-700">
-              <h2 className="font-bold text-lg text-slate-100">Save Summary</h2>
+              <h2 className="font-bold text-lg text-slate-100">
+                {isSavingGrandTotal ? 'Save Grand Total' : 'Save Summary'}
+              </h2>
             </div>
             <form onSubmit={confirmSaveArchive} className="p-4 space-y-4">
               <div>
@@ -563,26 +643,30 @@ export default function App() {
                   onChange={(e) => setSummaryName(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-600 p-2.5 rounded-lg outline-none focus:border-blue-500 font-bold text-slate-100 placeholder-slate-600 transition"
                   autoFocus
-                  placeholder="e.g., Morning Shift"
+                  placeholder={isSavingGrandTotal ? "e.g., Today's Full Total" : "e.g., Morning Shift"}
                 />
               </div>
               
-              <div className="flex items-center gap-2 mt-2 bg-slate-700/50 p-2.5 rounded-lg border border-slate-600">
-                <input 
-                  type="checkbox" 
-                  id="clearAfterSave" 
-                  checked={clearAfterSave} 
-                  onChange={(e) => setClearAfterSave(e.target.checked)} 
-                  className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-800 bg-slate-900 cursor-pointer"
-                />
-                <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
-                  Clear calculations after saving
-                </label>
-              </div>
+              {!isSavingGrandTotal && (
+                <div className="flex items-center gap-2 mt-2 bg-slate-700/50 p-2.5 rounded-lg border border-slate-600">
+                  <input 
+                    type="checkbox" 
+                    id="clearAfterSave" 
+                    checked={clearAfterSave} 
+                    onChange={(e) => setClearAfterSave(e.target.checked)} 
+                    className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 cursor-pointer"
+                  />
+                  <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
+                    Clear calculations after saving
+                  </label>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowSavePrompt(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 rounded-lg transition border border-slate-600">Cancel</button>
-                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition">Save</button>
+                <button type="submit" className={`flex-1 ${isSavingGrandTotal ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500'} text-white font-bold py-2.5 rounded-lg shadow-lg transition`}>
+                  Save
+                </button>
               </div>
             </form>
           </div>
@@ -608,7 +692,7 @@ export default function App() {
                   value={archiveDateFilter}
                   onChange={(e) => {
                     setArchiveDateFilter(e.target.value);
-                    setSelectedArchives(new Set()); // Reset selections on filter change
+                    setSelectedArchives(new Set());
                   }}
                   className="flex-1 p-2 bg-slate-800 border border-slate-600 rounded-lg outline-none font-bold text-slate-200 focus:border-blue-500 transition"
                   style={{ colorScheme: 'dark' }}
@@ -639,7 +723,7 @@ export default function App() {
                 </div>
               ) : (
                 filteredArchives.map(arc => (
-                  <div key={arc.id} className={`bg-slate-800 border ${selectedArchives.has(arc.id) ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-700'} rounded-xl p-4 shadow-sm transition-all`}>
+                  <div key={arc.id} className={`bg-slate-800 border ${selectedArchives.has(arc.id) ? 'border-blue-500 ring-1 ring-blue-500' : arc.isGrandTotal ? 'border-indigo-500/50' : 'border-slate-700'} rounded-xl p-4 shadow-sm transition-all`}>
                     <div className="flex justify-between items-start mb-3">
                       <div 
                         className="flex items-start gap-3 flex-1 cursor-pointer" 
@@ -648,11 +732,14 @@ export default function App() {
                         <input 
                           type="checkbox" 
                           checked={selectedArchives.has(arc.id)}
-                          onChange={() => {}} // Handled by div wrapper for bigger hit area
+                          onChange={() => {}} 
                           className="mt-1 w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 pointer-events-none"
                         />
                         <div>
-                          <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-slate-200 text-base">{arc.name}</h3>
+                            {arc.isGrandTotal && <span className="bg-indigo-900 text-indigo-300 text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wide">GRAND TOTAL</span>}
+                          </div>
                           <p className="text-[10px] text-slate-400 font-medium mt-0.5">{arc.date}</p>
                         </div>
                       </div>
@@ -713,19 +800,24 @@ export default function App() {
                 {grandTotalText}
               </pre>
             </div>
-            <div className="p-4 border-t border-slate-700 bg-slate-800/50 flex gap-3 rounded-b-xl">
-              <button onClick={() => copyToClipboard(grandTotalText)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm border border-slate-600">
-                <FaCopy className="mr-2" /> COPY
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 space-y-3 rounded-b-xl">
+              <button onClick={initiateSaveGrandTotal} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow-lg transition">
+                <FaSave className="mr-2" /> SAVE GRAND TOTAL
               </button>
-              <button onClick={() => shareToWhatsApp(grandTotalText)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm">
-                <FaWhatsapp className="mr-2 text-lg" /> SHARE
-              </button>
+              <div className="flex gap-3">
+                <button onClick={() => copyToClipboard(grandTotalText)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm border border-slate-600">
+                  <FaCopy className="mr-2" /> COPY
+                </button>
+                <button onClick={() => shareToWhatsApp(grandTotalText)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow transition text-sm">
+                  <FaWhatsapp className="mr-2 text-lg" /> SHARE
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* SETTINGS MODAL */}
+      {/* SETTINGS MODAL (Unchanged but included for completeness) */}
       {showSettings && (
         <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-800 rounded-xl w-full max-w-sm flex flex-col max-h-[90vh] shadow-2xl border border-slate-700">
@@ -735,7 +827,6 @@ export default function App() {
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-6">
               
-              {/* BACKUP SECTION */}
               <div className="bg-slate-900 border border-blue-900/50 p-4 rounded-xl shadow-inner">
                 <h3 className="font-bold text-blue-400 text-xs mb-3 uppercase tracking-wider flex items-center">
                   <FaArchive className="mr-2"/> Data Backup
@@ -747,13 +838,7 @@ export default function App() {
                   <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-slate-800 border border-blue-500/50 hover:bg-slate-700 text-blue-400 font-bold py-2.5 rounded-lg text-xs flex items-center justify-center transition">
                     <FaFileImport className="mr-1.5" /> IMPORT
                   </button>
-                  <input 
-                    type="file" 
-                    accept=".json" 
-                    ref={fileInputRef} 
-                    className="hidden" 
-                    onChange={handleImportData}
-                  />
+                  <input type="file" accept=".json" ref={fileInputRef} className="hidden" onChange={handleImportData}/>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-3 leading-relaxed">Export your data regularly to prevent accidental loss. Import a backup file to restore your entries and rates.</p>
               </div>
