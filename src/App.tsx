@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaTrash, FaPlus, FaMinus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp,   FaLayerGroup, FaBoxOpen, FaTags, FaUserPlus, FaUsers } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaMinus, FaCopy, FaCog, FaTimes, FaClipboardList, FaArchive, FaSave, FaCheck, FaCalendarAlt, FaWhatsapp, FaFileExport, FaFileImport, FaLayerGroup, FaBoxOpen, FaTags, FaUserPlus, FaUsers } from 'react-icons/fa';
 
 type Mode = 'Normal' | 'ALL' | 'BOX (3)' | 'BOX (6)' | 'BOX (4)' | 'BOX (12)' | 'BOX (24)';
 
@@ -108,7 +108,7 @@ export default function App() {
   const [showGrandTotalModal, setShowGrandTotalModal] = useState(false);
   const [grandTotalText, setGrandTotalText] = useState('');
   const [grandTotalEntries, setGrandTotalEntries] = useState<EntryItem[]>([]);
-  
+  const [isSavingGrandTotal, setIsSavingGrandTotal] = useState(false);
   
   // Custom Alerts & Confirms State
   const [toastMessage, setToastMessage] = useState('');
@@ -242,7 +242,6 @@ export default function App() {
     });
   };
 
-  // Helper to generate text for a specific customer or ALL combined customers
   const generateSummaryText = (sourceEntries: EntryItem[] = entries, isGrandTotal = false, customTitle = '') => {
     const now = new Date();
     let text = customTitle ? `${customTitle}\n` : (isGrandTotal 
@@ -287,7 +286,6 @@ export default function App() {
     return text.trim();
   };
 
-  // Generate a master summary combining ALL open customer bills
   const generateAllCustomersCombinedText = () => {
     const allEntries = customers.flatMap(c => c.entries);
     const now = new Date();
@@ -778,7 +776,9 @@ export default function App() {
         <div className="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-800 rounded-xl w-full max-w-xs flex flex-col shadow-2xl border border-slate-700">
             <div className="p-4 border-b border-slate-700">
-              <h2 className="font-bold text-lg text-slate-100">Save Summary</h2>
+              <h2 className="font-bold text-lg text-slate-100">
+                {isSavingGrandTotal ? 'Save Grand Total' : 'Save Summary'}
+              </h2>
             </div>
             <form onSubmit={confirmSaveArchive} className="p-4 space-y-4">
               <div>
@@ -792,22 +792,24 @@ export default function App() {
                 />
               </div>
               
-              <div className="flex items-center gap-2 mt-2 bg-slate-700/50 p-2.5 rounded-lg border border-slate-600">
-                <input 
-                  type="checkbox" 
-                  id="clearAfterSave" 
-                  checked={clearAfterSave} 
-                  onChange={(e) => setClearAfterSave(e.target.checked)} 
-                  className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 cursor-pointer"
-                />
-                <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
-                  Clear entries for {activeCustomer.name} after save
-                </label>
-              </div>
+              {!isSavingGrandTotal && (
+                <div className="flex items-center gap-2 mt-2 bg-slate-700/50 p-2.5 rounded-lg border border-slate-600">
+                  <input 
+                    type="checkbox" 
+                    id="clearAfterSave" 
+                    checked={clearAfterSave} 
+                    onChange={(e) => setClearAfterSave(e.target.checked)} 
+                    className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 cursor-pointer"
+                  />
+                  <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
+                    Clear entries for {activeCustomer.name} after save
+                  </label>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowSavePrompt(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 rounded-lg transition border border-slate-600 text-xs">Cancel</button>
-                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg shadow-lg transition text-xs">Save</button>
+                <button type="submit" className={`flex-1 ${isSavingGrandTotal ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500'} text-white font-bold py-2.5 rounded-lg shadow-lg transition text-xs`}>Save</button>
               </div>
             </form>
           </div>
@@ -914,12 +916,9 @@ export default function App() {
             </div>
             <div className="p-4 border-t border-slate-700 bg-slate-800 space-y-2">
               <button onClick={() => {
-                setArchives([{ id: Date.now().toString(), name: `Combined Total (${selectedArchives.size} files)`, date: new Date().toLocaleString(), summaryText: grandTotalText, entries: grandTotalEntries, isGrandTotal: true }, ...archives]);
-                setShowGrandTotalModal(false);
-                setSelectedArchives(new Set());
-                setArchiveTab('Grand');
-                setShowArchives(true);
-                showToast("Grand Total saved!");
+                setIsSavingGrandTotal(true);
+                setSummaryName(`Grand Total (${selectedArchives.size} Files)`);
+                setShowSavePrompt(true);
               }} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-xs">SAVE GRAND TOTAL</button>
               <div className="flex gap-2">
                 <button onClick={() => copyToClipboard(grandTotalText)} className="flex-1 bg-slate-700 text-slate-100 font-bold py-2 rounded text-xs">COPY</button>
