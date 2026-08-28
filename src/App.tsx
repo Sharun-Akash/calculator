@@ -102,8 +102,8 @@ export default function App() {
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
   const [archiveTab, setArchiveTab] = useState<'Normal' | 'Grand'>('Normal');
 
-  // Focus Mode State (Collection Only)
-  const [focusCollectionOnly, setFocusCollectionOnly] = useState(false);
+  // Privacy Toggle State (Hides Base & Commission when true)
+  const [hideSensitiveDetails, setHideSensitiveDetails] = useState(false);
 
   const [saveTarget, setSaveTarget] = useState<'current' | 'combined'>('current');
   const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
@@ -482,7 +482,7 @@ export default function App() {
     switch (cat) {
       case '1D': return isSelected ? 'bg-rose-600 border-rose-400 text-white shadow-md' : 'border-rose-900/60 text-rose-400 bg-slate-900 hover:bg-rose-900/30';
       case '2D': return isSelected ? 'bg-emerald-600 border-emerald-400 text-white shadow-md' : 'border-emerald-900/60 text-emerald-400 bg-slate-900 hover:bg-emerald-900/30';
-      case '3D': return isSelected ? 'bg-blue-600 border-blue-400 text-white shadow-md' : 'border-blue-900/60 text-blue-400 bg-slate-900 hover:bg-blue-900/30';
+      case '3D': return isSelected ? 'bg-blue-600 border-blue-400 text-white shadow-md' : 'border-blue-900/60 text-blue-400 bg-slate-900 hover:bg-slate-900/30';
       case '4D': return isSelected ? 'bg-purple-600 border-purple-400 text-white shadow-md' : 'border-purple-900/60 text-purple-400 bg-slate-900 hover:bg-purple-900/30';
       default: return isSelected ? 'bg-slate-600 border-slate-400 text-white shadow-md' : 'border-slate-700 text-slate-400 hover:bg-slate-800';
     }
@@ -503,9 +503,6 @@ export default function App() {
   const totalBase = entries.reduce((sum, item) => sum + item.itemBase, 0);
   const totalCommission = entries.reduce((sum, item) => sum + item.itemCommission, 0);
 
-  // Combined Collection across all customers when in focus mode
-  const grandCombinedCollection = customers.reduce((acc, cust) => acc + cust.entries.reduce((s, i) => s + i.itemCollection, 0), 0);
-
   return (
     <div className="h-[100dvh] bg-slate-900 flex flex-col font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden text-slate-100">
       
@@ -513,16 +510,15 @@ export default function App() {
       <header className="bg-slate-950 text-slate-100 p-3 shadow-lg z-10 flex justify-between items-center shrink-0 border-b border-slate-800">
         <h1 className="text-lg font-bold tracking-wider truncate text-blue-400">SHARUN'S APP</h1>
         <div className="flex gap-2 shrink-0 items-center">
-          {/* Focus Mode Toggle Button */}
+          {/* Privacy Toggle Eye Button */}
           <button 
-            onClick={() => setFocusCollectionOnly(!focusCollectionOnly)} 
-            className={`px-2.5 py-1 flex items-center rounded text-sm font-bold shadow-sm transition border ${
-              focusCollectionOnly ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+            onClick={() => setHideSensitiveDetails(!hideSensitiveDetails)} 
+            className={`p-2 rounded-lg text-sm font-bold transition border ${
+              hideSensitiveDetails ? 'bg-amber-600 text-white border-amber-400' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
             }`}
-            title="Focus Mode (Collection Only)"
+            title={hideSensitiveDetails ? "Show Base & Commission" : "Hide Base & Commission (Privacy Mode)"}
           >
-            {focusCollectionOnly ? <FaEyeSlash className="mr-1 text-white"/> : <FaEye className="mr-1 text-blue-400"/>}
-            <span>{focusCollectionOnly ? 'FOCUS' : 'VIEW'}</span>
+            {hideSensitiveDetails ? <FaEyeSlash className="text-white"/> : <FaEye className="text-blue-400"/>}
           </button>
 
           <button onClick={() => { setShowArchives(true); setSelectedArchives(new Set()); }} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-2 py-1 flex items-center rounded text-sm font-bold shadow-sm transition">
@@ -537,169 +533,149 @@ export default function App() {
         </div>
       </header>
 
-      {/* FOCUS MODE (COLLECTION ONLY) VIEW */}
-      {focusCollectionOnly ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-950 text-center space-y-6">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full shadow-2xl">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Current ({activeCustomer.name}) Collection</div>
-            <div className="text-5xl font-black text-blue-400 my-4">₹{totalCollection.toFixed(2)}</div>
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full shadow-2xl">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Grand Combined Collection (All Customers)</div>
-            <div className="text-4xl font-black text-emerald-400 my-4">₹{grandCombinedCollection.toFixed(2)}</div>
-          </div>
-
-          <button 
-            onClick={() => setFocusCollectionOnly(false)} 
-            className="mt-6 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold px-6 py-3 rounded-xl shadow transition text-sm flex items-center"
-          >
-            <FaEye className="mr-2 text-blue-400" /> Exit Focus Mode
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* MULTI-CUSTOMER TABS BAR */}
-          <div className="bg-slate-950 px-3 py-2 shrink-0 border-b border-slate-800 flex items-center gap-2 overflow-x-auto custom-scrollbar">
-            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1 shrink-0 uppercase">
-              <FaUsers className="text-blue-400"/> BILLS:
-            </span>
-            {customers.map(cust => {
-              const isActive = cust.id === activeCustomerId;
-              const hasEntries = cust.entries.length > 0;
-              return (
-                <div key={cust.id} className="flex items-center shrink-0">
-                  {editingCustId === cust.id ? (
-                    <div className="flex items-center bg-slate-800 border border-blue-500 rounded px-1.5 py-0.5">
-                      <input
-                        type="text"
-                        value={customerNameInput}
-                        onChange={(e) => setCustomerNameInput(e.target.value)}
-                        className="bg-transparent text-xs text-slate-100 outline-none w-20 font-bold"
-                        autoFocus
-                        onKeyDown={(e) => e.key === 'Enter' && handleSaveCustomerName(cust.id)}
-                      />
-                      <button onClick={() => handleSaveCustomerName(cust.id)} className="text-blue-400 text-xs ml-1"><FaCheck /></button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setActiveCustomerId(cust.id)}
-                      onDoubleClick={() => { setEditingCustId(cust.id); setCustomerNameInput(cust.name); }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition border ${
-                        isActive 
-                          ? 'bg-blue-600 text-white border-blue-400 shadow-md' 
-                          : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
-                      }`}
-                    >
-                      <span>{cust.name}</span>
-                      {hasEntries && <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Has active entries"></span>}
-                      {customers.length > 1 && (
-                        <span 
-                          onClick={(e) => handleRemoveCustomer(cust.id, e)} 
-                          className="ml-1 opacity-70 hover:opacity-100 hover:text-red-400"
-                        >
-                          <FaTimes size={10} />
-                        </span>
-                      )}
-                    </button>
-                  )}
+      {/* MULTI-CUSTOMER TABS BAR */}
+      <div className="bg-slate-950 px-3 py-2 shrink-0 border-b border-slate-800 flex items-center gap-2 overflow-x-auto custom-scrollbar">
+        <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1 shrink-0 uppercase">
+          <FaUsers className="text-blue-400"/> BILLS:
+        </span>
+        {customers.map(cust => {
+          const isActive = cust.id === activeCustomerId;
+          const hasEntries = cust.entries.length > 0;
+          return (
+            <div key={cust.id} className="flex items-center shrink-0">
+              {editingCustId === cust.id ? (
+                <div className="flex items-center bg-slate-800 border border-blue-500 rounded px-1.5 py-0.5">
+                  <input
+                    type="text"
+                    value={customerNameInput}
+                    onChange={(e) => setCustomerNameInput(e.target.value)}
+                    className="bg-transparent text-xs text-slate-100 outline-none w-20 font-bold"
+                    autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveCustomerName(cust.id)}
+                  />
+                  <button onClick={() => handleSaveCustomerName(cust.id)} className="text-blue-400 text-xs ml-1"><FaCheck /></button>
                 </div>
-              );
+              ) : (
+                <button
+                  onClick={() => setActiveCustomerId(cust.id)}
+                  onDoubleClick={() => { setEditingCustId(cust.id); setCustomerNameInput(cust.name); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition border ${
+                    isActive 
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-md' 
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                  }`}
+                >
+                  <span>{cust.name}</span>
+                  {hasEntries && <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Has active entries"></span>}
+                  {customers.length > 1 && (
+                    <span 
+                      onClick={(e) => handleRemoveCustomer(cust.id, e)} 
+                      className="ml-1 opacity-70 hover:opacity-100 hover:text-red-400"
+                    >
+                      <FaTimes size={10} />
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          onClick={handleAddCustomer}
+          className="bg-slate-900 border border-dashed border-slate-600 hover:border-blue-400 text-slate-400 hover:text-blue-400 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition"
+        >
+          <FaUserPlus /> New
+        </button>
+      </div>
+
+      {/* TOUCHBOX PRICES & MODES */}
+      <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10 flex flex-col gap-3">
+        <div>
+          <label className="text-[10px] text-slate-400 font-bold mb-2 flex items-center gap-1 uppercase tracking-wider"><FaTags /> PRICE & CATEGORY</label>
+          <div className="flex flex-wrap gap-2">
+            {allOrderedRates.map((item, i) => {
+              const isSelected = (category === item.cat && collectionRate === item.rate);
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => { setCategory(item.cat); setCollectionRate(item.rate); }}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-sm border-2 transition-all flex flex-col items-center justify-center min-w-[64px] ${getCatStyles(item.cat, isSelected)}`}
+                >
+                  ₹{item.rate.toFixed(1)}
+                  <span className={`block text-[9px] ${isSelected ? 'opacity-100 font-black' : 'opacity-60'}`}>{item.cat}</span>
+                </button>
+              )
             })}
-            <button
-              onClick={handleAddCustomer}
-              className="bg-slate-900 border border-dashed border-slate-600 hover:border-blue-400 text-slate-400 hover:text-blue-400 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition"
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] text-slate-400 font-bold mb-1.5 flex items-center gap-1 uppercase tracking-wider"><FaBoxOpen /> SELECT MODE</label>
+          <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+            {getAvailableModes().map(m => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all border shadow-sm ${
+                  mode === m 
+                    ? 'bg-blue-600 text-white border-blue-400' 
+                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* INPUT AREA */}
+      <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg border-b border-slate-700">
+        <form onSubmit={handleAdd} className="flex gap-2 items-stretch h-12">
+          <div className="flex-1 flex items-stretch bg-slate-900 border border-slate-600 rounded-lg shadow-inner overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
+            <button 
+              type="button" 
+              onClick={() => setCurrentQty(Math.max(0, currentQty - 1))} 
+              className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-r border-slate-700"
             >
-              <FaUserPlus /> New
+              <FaMinus />
+            </button>
+            
+            <input 
+              ref={inputRef} 
+              type="number" 
+              className="flex-1 w-full text-xl bg-transparent text-center font-bold text-slate-100 outline-none" 
+              placeholder="0" 
+              value={currentQty === 0 ? '' : currentQty} 
+              onChange={(e) => setCurrentQty(parseInt(e.target.value) || 0)} 
+            />
+            
+            <button 
+              type="button" 
+              onClick={() => setCurrentQty(currentQty + 1)} 
+              className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-l border-slate-700"
+            >
+              <FaPlus />
             </button>
           </div>
 
-          {/* TOUCHBOX PRICES & MODES */}
-          <div className="bg-slate-800 p-3 shrink-0 border-b border-slate-700 shadow-md z-10 flex flex-col gap-3">
-            <div>
-              <label className="text-[10px] text-slate-400 font-bold mb-2 flex items-center gap-1 uppercase tracking-wider"><FaTags /> PRICE & CATEGORY</label>
-              <div className="flex flex-wrap gap-2">
-                {allOrderedRates.map((item, i) => {
-                  const isSelected = (category === item.cat && collectionRate === item.rate);
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => { setCategory(item.cat); setCollectionRate(item.rate); }}
-                      className={`px-3 py-1.5 rounded-lg font-bold text-sm border-2 transition-all flex flex-col items-center justify-center min-w-[64px] ${getCatStyles(item.cat, isSelected)}`}
-                    >
-                      ₹{item.rate.toFixed(1)}
-                      <span className={`block text-[9px] ${isSelected ? 'opacity-100 font-black' : 'opacity-60'}`}>{item.cat}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+          <button type="submit" disabled={currentQty === 0} className={`px-6 rounded-lg text-lg font-bold shadow-md transition flex items-center ${currentQty > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 text-slate-400 opacity-70'}`}>
+            <FaPlus className="mr-1" /> ADD
+          </button>
+        </form>
+      </div>
 
-            <div>
-              <label className="text-[10px] text-slate-400 font-bold mb-1.5 flex items-center gap-1 uppercase tracking-wider"><FaBoxOpen /> SELECT MODE</label>
-              <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                {getAvailableModes().map(m => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all border shadow-sm ${
-                      mode === m 
-                        ? 'bg-blue-600 text-white border-blue-400' 
-                        : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* DASHBOARD (Dynamically hides base & commission when privacy mode is on) */}
+      <div className="bg-slate-900 p-3 shrink-0 mt-1">
+        <div className={`grid ${hideSensitiveDetails ? 'grid-cols-1' : 'grid-cols-3'} gap-2 text-sm text-center transition-all`}>
+          <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
+            <div className="text-[9px] text-slate-400 font-bold tracking-wider">COLLECTION</div>
+            <div className="text-sm font-bold text-blue-400">₹{totalCollection.toFixed(2)}</div>
           </div>
-
-          {/* INPUT AREA */}
-          <div className="bg-slate-800 p-3 shrink-0 z-10 shadow-lg border-b border-slate-700">
-            <form onSubmit={handleAdd} className="flex gap-2 items-stretch h-12">
-              <div className="flex-1 flex items-stretch bg-slate-900 border border-slate-600 rounded-lg shadow-inner overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
-                <button 
-                  type="button" 
-                  onClick={() => setCurrentQty(Math.max(0, currentQty - 1))} 
-                  className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-r border-slate-700"
-                >
-                  <FaMinus />
-                </button>
-                
-                <input 
-                  ref={inputRef} 
-                  type="number" 
-                  className="flex-1 w-full text-xl bg-transparent text-center font-bold text-slate-100 outline-none" 
-                  placeholder="0" 
-                  value={currentQty === 0 ? '' : currentQty} 
-                  onChange={(e) => setCurrentQty(parseInt(e.target.value) || 0)} 
-                />
-                
-                <button 
-                  type="button" 
-                  onClick={() => setCurrentQty(currentQty + 1)} 
-                  className="w-14 bg-slate-700/80 hover:bg-slate-600 flex items-center justify-center text-slate-200 transition border-l border-slate-700"
-                >
-                  <FaPlus />
-                </button>
-              </div>
-
-              <button type="submit" disabled={currentQty === 0} className={`px-6 rounded-lg text-lg font-bold shadow-md transition flex items-center ${currentQty > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 text-slate-400 opacity-70'}`}>
-                <FaPlus className="mr-1" /> ADD
-              </button>
-            </form>
-          </div>
-
-          {/* DASHBOARD */}
-          <div className="bg-slate-900 p-3 shrink-0 mt-1">
-            <div className="grid grid-cols-3 gap-2 text-sm text-center">
-              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
-                <div className="text-[9px] text-slate-400 font-bold tracking-wider">COLLECTION</div>
-                <div className="text-sm font-bold text-blue-400">₹{totalCollection.toFixed(2)}</div>
-              </div>
+          {!hideSensitiveDetails && (
+            <>
               <div className="bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-sm">
                 <div className="text-[9px] text-slate-400 font-bold tracking-wider">BASE</div>
                 <div className="text-sm font-bold text-amber-500">₹{totalBase.toFixed(2)}</div>
@@ -708,71 +684,75 @@ export default function App() {
                 <div className="text-[9px] text-slate-400 font-bold tracking-wider">COMMISSION</div>
                 <div className="text-sm font-black text-emerald-400">₹{totalCommission.toFixed(2)}</div>
               </div>
-            </div>
-          </div>
+            </>
+          )}
+        </div>
+      </div>
 
-          {/* TABLE */}
-          <div className="flex-1 overflow-y-auto bg-slate-900 p-2 pb-16">
-            <div className="flex justify-between items-center mb-2 px-1">
-              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">{activeCustomer.name} Entries</span>
-              {entries.length > 0 && (
-                <button onClick={handleClearAll} className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center bg-slate-800 border border-red-900/50 hover:bg-slate-700 px-2 py-1 rounded transition">
-                  <FaTrash className="mr-1"/> CLEAR
-                </button>
-              )}
-            </div>
+      {/* TABLE */}
+      <div className="flex-1 overflow-y-auto bg-slate-900 p-2 pb-16">
+        <div className="flex justify-between items-center mb-2 px-1">
+          <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">{activeCustomer.name} Entries</span>
+          {entries.length > 0 && (
+            <button onClick={handleClearAll} className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center bg-slate-800 border border-red-900/50 hover:bg-slate-700 px-2 py-1 rounded transition">
+              <FaTrash className="mr-1"/> CLEAR
+            </button>
+          )}
+        </div>
 
-            <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
-              <table className="w-full text-sm text-left">
-                <thead className="bg-slate-950 text-slate-400 font-bold text-[10px] uppercase tracking-wider">
-                  <tr>
-                    <th className="px-2 py-3">Type</th>
-                    <th className="px-2 py-3 text-center">Qty</th>
-                    <th className="px-2 py-3 text-right">Details</th>
-                    <th className="px-2 py-3 text-center">Del</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="text-center py-8 text-slate-500 font-medium italic">No entries for {activeCustomer.name}.</td>
-                    </tr>
-                  ) : (
-                    entries.map((entry) => (
-                      <tr key={entry.id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition">
-                        <td className="px-2 py-3">
-                          <div className={`font-bold ${entry.category === '1D' ? 'text-rose-400' : entry.category === '2D' ? 'text-emerald-400' : entry.category === '3D' ? 'text-blue-400' : 'text-purple-400'}`}>
-                            {entry.category}
-                          </div>
-                          <div className="text-[10px] text-slate-400">₹{entry.rate}</div>
-                          {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-300 font-bold mt-0.5">{entry.mode}</div>}
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          <input 
-                            type="number" 
-                            value={entry.originalQty || ''} 
-                            onChange={(e) => handleUpdateQty(entry.id, parseInt(e.target.value) || 0)}
-                            className="w-14 text-center font-bold text-lg border-b-2 border-slate-600 outline-none bg-transparent text-slate-100 focus:border-blue-400 transition"
-                          />
-                          {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-400 mt-1">(x{entry.multiplier}={entry.effectiveQty})</div>}
-                        </td>
-                        <td className="px-2 py-3 text-right">
-                          <div className="font-bold text-slate-200 text-xs">C: ₹{entry.itemCollection}</div>
+        <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-950 text-slate-400 font-bold text-[10px] uppercase tracking-wider">
+              <tr>
+                <th className="px-2 py-3">Type</th>
+                <th className="px-2 py-3 text-center">Qty</th>
+                <th className="px-2 py-3 text-right">Details</th>
+                <th className="px-2 py-3 text-center">Del</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="text-center py-8 text-slate-500 font-medium italic">No entries for {activeCustomer.name}.</td>
+                </tr>
+              ) : (
+                entries.map((entry) => (
+                  <tr key={entry.id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition">
+                    <td className="px-2 py-3">
+                      <div className={`font-bold ${entry.category === '1D' ? 'text-rose-400' : entry.category === '2D' ? 'text-emerald-400' : entry.category === '3D' ? 'text-blue-400' : 'text-purple-400'}`}>
+                        {entry.category}
+                      </div>
+                      <div className="text-[10px] text-slate-400">₹{entry.rate}</div>
+                      {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-300 font-bold mt-0.5">{entry.mode}</div>}
+                    </td>
+                    <td className="px-2 py-3 text-center">
+                      <input 
+                        type="number" 
+                        value={entry.originalQty || ''} 
+                        onChange={(e) => handleUpdateQty(entry.id, parseInt(e.target.value) || 0)}
+                        className="w-14 text-center font-bold text-lg border-b-2 border-slate-600 outline-none bg-transparent text-slate-100 focus:border-blue-400 transition"
+                      />
+                      {entry.mode !== 'Normal' && <div className="text-[9px] text-slate-400 mt-1">(x{entry.multiplier}={entry.effectiveQty})</div>}
+                    </td>
+                    <td className="px-2 py-3 text-right">
+                      <div className="font-bold text-slate-200 text-xs">C: ₹{entry.itemCollection}</div>
+                      {!hideSensitiveDetails && (
+                        <>
                           <div className="text-[10px] text-amber-500/90 mt-0.5">B: ₹{entry.itemBase}</div>
                           <div className="text-[10px] text-emerald-400 font-bold mt-0.5">P: ₹{entry.itemCommission}</div>
-                        </td>
-                        <td className="px-2 py-3 text-center">
-                          <button onClick={() => handleDelete(entry.id)} className="text-red-400/80 hover:text-red-400 p-2 transition"><FaTrash /></button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
+                        </>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 text-center">
+                      <button onClick={() => handleDelete(entry.id)} className="text-red-400/80 hover:text-red-400 p-2 transition"><FaTrash /></button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {/* SUMMARY MODAL */}
       {showSummary && (
