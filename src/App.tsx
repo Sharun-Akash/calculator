@@ -69,7 +69,6 @@ export default function App() {
     return savedRates ? JSON.parse(savedRates) : DEFAULT_RATES;
   });
 
-  // Multiple Customer Bills State
   const [customers, setCustomers] = useState<CustomerBill[]>(() => {
     const saved = localStorage.getItem('multiCustomerBills');
     if (saved) {
@@ -103,6 +102,9 @@ export default function App() {
   const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
   const [archiveTab, setArchiveTab] = useState<'Normal' | 'Grand'>('Normal');
 
+  // Save Target State ('current' or 'combined')
+  const [saveTarget, setSaveTarget] = useState<'current' | 'combined'>('current');
+
   // Grand Total State
   const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
   const [showGrandTotalModal, setShowGrandTotalModal] = useState(false);
@@ -116,7 +118,6 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Active customer helper
   const activeCustomer = customers.find(c => c.id === activeCustomerId) || customers[0];
   const entries = activeCustomer ? activeCustomer.entries : [];
 
@@ -147,7 +148,6 @@ export default function App() {
     showToast(`Added ${newName}`);
   };
 
-  // Inline Customer Rename State
   const [editingCustId, setEditingCustId] = useState<string | null>(null);
   const [customerNameInput, setCustomerNameInput] = useState('');
 
@@ -321,10 +321,14 @@ export default function App() {
     window.open(`https://wa.me/?text=${encodedText}`, '_blank');
   };
 
-  const initiateSaveArchive = () => {
-    if (entries.length === 0) return showToast("No entries to save.");
+  const initiateSaveArchive = (target: 'current' | 'combined') => {
+    const allEntries = customers.flatMap(c => c.entries);
+    if (target === 'current' && entries.length === 0) return showToast(`No entries for ${activeCustomer.name}.`);
+    if (target === 'combined' && allEntries.length === 0) return showToast("No entries across any customer.");
+
+    setSaveTarget(target);
     setIsSavingGrandTotal(false);
-    setSummaryName(`${activeCustomer.name} Summary`);
+    setSummaryName(target === 'current' ? `${activeCustomer.name} Summary` : `All Customers Combined`);
     setShowSavePrompt(true);
   };
 
@@ -335,6 +339,10 @@ export default function App() {
       return;
     }
     
+    const allEntries = customers.flatMap(c => c.entries);
+    const targetEntries = saveTarget === 'current' ? [...entries] : allEntries;
+    const targetSummaryText = saveTarget === 'current' ? generateSummaryText(entries) : generateAllCustomersCombinedText();
+
     const newArchive: SavedSummary = {
       id: Date.now().toString(),
       name: summaryName.trim(),
@@ -342,12 +350,19 @@ export default function App() {
         year: 'numeric', month: 'short', day: 'numeric', 
         hour: '2-digit', minute:'2-digit' 
       }),
-      summaryText: generateSummaryText(entries),
-      entries: [...entries]
+      summaryText: targetSummaryText,
+      entries: targetEntries
     };
     
     setArchives([newArchive, ...archives]);
-    if (clearAfterSave) updateActiveEntries([]);
+    if (clearAfterSave) {
+      if (saveTarget === 'current') {
+        updateActiveEntries([]);
+      } else {
+        // Clear all customer entries
+        setCustomers(customers.map(c => ({ ...c, entries: [] })));
+      }
+    }
     
     setShowSavePrompt(false);
     setShowSummary(false);
@@ -748,16 +763,23 @@ export default function App() {
               )}
             </div>
             <div className="p-4 border-t border-slate-700 bg-slate-800/50 space-y-2 rounded-b-xl">
-              <button onClick={initiateSaveArchive} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow-lg transition text-xs">
-                <FaSave className="mr-2" /> SAVE {activeCustomer.name.toUpperCase()} SUMMARY
-              </button>
               <div className="flex gap-2">
-                <button onClick={() => copyToClipboard(generateSummaryText())} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2 rounded-lg flex items-center justify-center shadow transition text-xs border border-slate-600">
-                  <FaCopy className="mr-1.5" /> COPY CURRENT
+                <button onClick={() => initiateSaveArchive('current')} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow-lg transition text-xs">
+                  <FaSave className="mr-1.5" /> SAVE CURRENT
                 </button>
                 {customers.length > 1 && (
-                  <button onClick={() => copyToClipboard(generateAllCustomersCombinedText())} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg flex items-center justify-center shadow transition text-xs">
-                    <FaCopy className="mr-1.5" /> COPY ALL
+                  <button onClick={() => initiateSaveArchive('combined')} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-lg flex items-center justify-center shadow-lg transition text-xs">
+                    <FaSave className="mr-1.5" /> SAVE COMBINED
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => copyToClipboard(generateSummaryText())} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold py-2 rounded-lg flex items-center justify-center shadow transition text-xs border border-slate-600">
+                  <FaCopy className="mr-1" /> COPY CURRENT
+                </button>
+                {customers.length > 1 && (
+                  <button onClick={() => copyToClipboard(generateAllCustomersCombinedText())} className="flex-1 bg-indigo-700 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg flex items-center justify-center shadow transition text-xs">
+                    <FaCopy className="mr-1" /> COPY ALL
                   </button>
                 )}
               </div>
@@ -775,7 +797,7 @@ export default function App() {
           <div className="bg-slate-800 rounded-xl w-full max-w-xs flex flex-col shadow-2xl border border-slate-700">
             <div className="p-4 border-b border-slate-700">
               <h2 className="font-bold text-lg text-slate-100">
-                {isSavingGrandTotal ? 'Save Grand Total' : 'Save Summary'}
+                {isSavingGrandTotal ? 'Save Grand Total' : (saveTarget === 'combined' ? 'Save Combined Summary' : 'Save Summary')}
               </h2>
             </div>
             <form onSubmit={confirmSaveArchive} className="p-4 space-y-4">
@@ -800,14 +822,14 @@ export default function App() {
                     className="w-4 h-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-900 cursor-pointer"
                   />
                   <label htmlFor="clearAfterSave" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
-                    Clear entries for {activeCustomer.name} after save
+                    {saveTarget === 'combined' ? 'Clear entries for all customers after save' : `Clear entries for ${activeCustomer.name} after save`}
                   </label>
                 </div>
               )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowSavePrompt(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 rounded-lg transition border border-slate-600 text-xs">Cancel</button>
-                <button type="submit" className={`flex-1 ${isSavingGrandTotal ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500'} text-white font-bold py-2.5 rounded-lg shadow-lg transition text-xs`}>Save</button>
+                <button type="submit" className={`flex-1 ${isSavingGrandTotal || saveTarget === 'combined' ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500'} text-white font-bold py-2.5 rounded-lg shadow-lg transition text-xs`}>Save</button>
               </div>
             </form>
           </div>
